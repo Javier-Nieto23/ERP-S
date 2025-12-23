@@ -1,0 +1,31 @@
+.auth-page{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background: linear-gradient(135deg,#0f172a 0%, #0b1220 50%);
+  padding:24px;
+}
+.auth-card{
+  width: 380px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
+  border-radius:12px;
+  padding:28px;
+  box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+  color: #e6eef8;
+  font-family: Inter, system-ui, Arial;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.brand{
+  margin:0 0 6px 0;
+  font-size:20px;
+  letter-spacing:0.4px;
+}
+.subtitle{margin:0 0 18px 0;color:#9fb1d6;font-size:13px}
+.login-form label{display:block;margin-bottom:12px;font-size:13px}
+.login-form input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);color:#eaf4ff}
+.login-form input::placeholder{color:#7b93b2}
+.btn{width:100%;padding:10px 12px;margin-top:8px;border-radius:8px;border:none;background:linear-gradient(90deg,#4f46e5,#06b6d4);color:white;font-weight:600;cursor:pointer}
+.btn:active{opacity:0.95}
+.error{margin-top:8px;padding:8px;border-radius:6px;background:rgba(255,50,50,0.08);color:#ffb3b3;font-size:13px}
+.foot{margin-top:12px;font-size:12px;color:#8da8d6}

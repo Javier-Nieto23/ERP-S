@@ -1,0 +1,142 @@
+require('dotenv').config();
+const { query, pool, createDatabaseIfNotExists } = require('./db');
+const bcrypt = require('bcryptjs');
+
+async function run() {
+  try {
+    // Ensure database exists (will connect to 'postgres' to create if needed)
+    await createDatabaseIfNotExists();
+    await pool.connect();
+
+    // Usuarios Internos
+    await query(`CREATE TABLE IF NOT EXISTS usuarios_internos (
+      id SERIAL PRIMARY KEY,
+      nombre_usuario VARCHAR(150),
+      apellido_usuario VARCHAR(150),
+      email VARCHAR(254) UNIQUE,
+      password TEXT,
+      nombre VARCHAR(150),
+      rol VARCHAR(50) DEFAULT 'user',
+      activo BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Empresas
+    await query(`CREATE TABLE IF NOT EXISTS empresas (
+      id SERIAL PRIMARY KEY,
+      id_empresa VARCHAR(100),
+      nombre_empresa VARCHAR(250),
+      rfc VARCHAR(50),
+      fecha_pago DATE,
+      dias_asignados INTEGER,
+      id_documento INTEGER
+    )`);
+
+    // Empleados
+    await query(`CREATE TABLE IF NOT EXISTS empleados (
+      id SERIAL PRIMARY KEY,
+      id_empleado VARCHAR(100),
+      nombre_empleado VARCHAR(250),
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL
+    )`);
+
+    // Documentos
+    await query(`CREATE TABLE IF NOT EXISTS documentos (
+      id SERIAL PRIMARY KEY,
+      csf VARCHAR(255),
+      cd VARCHAR(255),
+      rt VARCHAR(255),
+      cot VARCHAR(255)
+    )`);
+
+    // Equipos
+    await query(`CREATE TABLE IF NOT EXISTS equipos (
+      id SERIAL PRIMARY KEY,
+      id_equipo VARCHAR(150) UNIQUE,
+      empleado_id INTEGER REFERENCES empleados(id) ON DELETE SET NULL,
+      tipo_equipo VARCHAR(120),
+      marca VARCHAR(120),
+      modelo VARCHAR(120),
+      numero_serie VARCHAR(200),
+      sistema_operativo VARCHAR(120),
+      procesador VARCHAR(120),
+      ram VARCHAR(50),
+      disco_duro VARCHAR(100),
+      codigo_registro VARCHAR(150)
+    )`);
+
+    // Codigo Registro
+    await query(`CREATE TABLE IF NOT EXISTS codigo_registro (
+      id SERIAL PRIMARY KEY,
+      codigo VARCHAR(255) UNIQUE,
+      equipo_id INTEGER REFERENCES equipos(id) ON DELETE CASCADE,
+      licencia_id INTEGER
+    )`);
+
+    // Licencia
+    await query(`CREATE TABLE IF NOT EXISTS licencia (
+      id SERIAL PRIMARY KEY,
+      id_registro INTEGER REFERENCES codigo_registro(id) ON DELETE SET NULL,
+      detalles TEXT
+    )`);
+
+    // Agenda
+    await query(`CREATE TABLE IF NOT EXISTS agenda (
+      id SERIAL PRIMARY KEY,
+      dia_agendado TIMESTAMP,
+      status VARCHAR(80),
+      usuario_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL
+    )`);
+
+    // Tickets
+    await query(`CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      titulo VARCHAR(250),
+      descripcion TEXT,
+      estado VARCHAR(80),
+      prioridad VARCHAR(80),
+      usuario_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL,
+      agenda_id INTEGER REFERENCES agenda(id) ON DELETE SET NULL
+    )`);
+
+    // Usuarios Empresas (usuarios que pertenecen a una empresa)
+    await query(`CREATE TABLE IF NOT EXISTS usuarios_empresas (
+      id SERIAL PRIMARY KEY,
+      id_usuario VARCHAR(150),
+      nombre_usuario VARCHAR(150),
+      apellido_usuario VARCHAR(150),
+      email VARCHAR(254),
+      password TEXT,
+      nombre_profile VARCHAR(200),
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL
+    )`);
+
+    // add FK from empresas.id_documento to documentos.id if present
+    await query(`ALTER TABLE IF EXISTS empresas ADD COLUMN IF NOT EXISTS documento_id INTEGER`);
+    await query(`UPDATE empresas SET documento_id = id_documento WHERE FALSE`)
+      .catch(() => {});
+
+    // Insert admin user if not exists
+    const adminEmail = 'admin@local.test';
+    const adminPassword = 'Admin123'; // 8 chars, 1 min, 1 mayus, 1 digito
+    const hashed = bcrypt.hashSync(adminPassword, 10);
+
+    const res = await query('SELECT id FROM usuarios_internos WHERE email = $1', [adminEmail]);
+    if (res.rows.length === 0) {
+      await query('INSERT INTO usuarios_internos (nombre_usuario, apellido_usuario, email, password, rol, activo) VALUES ($1,$2,$3,$4,$5,$6)',
+        ['Admin', 'User', adminEmail, hashed, 'admin', true]);
+      console.log('Admin user created with email:', adminEmail, 'and password:', adminPassword);
+    } else {
+      console.log('Admin already exists at', adminEmail);
+    }
+
+    console.log('DB initialization finished.');
+  } catch (err) {
+    console.error('Init DB error', err);
+  } finally {
+    await pool.end();
+    process.exit(0);
+  }
+}
+
+run();

@@ -1,34 +1,82 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useState } from 'react'
 import './App.css'
+import LoginForm from './components/LoginForm'
+import AdminDashboard from './components/AdminDashboard'
+import UserDashboard from './components/UserDashboard'
+import RhDashboard from './components/RhDashboard'
+import ClientDashboard from './components/ClientDashboard'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [auth, setAuth] = useState(() => {
+    const token = localStorage.getItem('token')
+    const user = localStorage.getItem('user')
+    return token && user ? { token, user: JSON.parse(user) } : null
+  })
+
+  useEffect(() => {
+    // future: validate token expiry
+  }, [])
+
+  function handleLogout() {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    setAuth(null)
+  }
+
+  if (!auth) return <LoginForm onLogin={({ token, user }) => setAuth({ token, user })} />
+
+  if (auth.user && auth.user.rol === 'admin') {
+    return (
+      <div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:12}}>
+          <h1>Portal RDP</h1>
+          <div>
+            <button onClick={handleLogout}>Cerrar sesión</button>
+          </div>
+        </div>
+        <AdminDashboard />
+      </div>
+    )
+  }
+
+  if (auth.user && auth.user.rol === 'rh') {
+    return (
+      <div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:12}}>
+          <h1>Portal RDP</h1>
+          <div>
+            <button onClick={handleLogout}>Cerrar sesión</button>
+          </div>
+        </div>
+        <RhDashboard />
+      </div>
+    )
+  }
+
+  if (auth.user && auth.user.rol === 'cliente') {
+    return (
+      <div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:12}}>
+          <h1>Portal RDP</h1>
+          <div>
+            <button onClick={handleLogout}>Cerrar sesión</button>
+          </div>
+        </div>
+        <ClientDashboard />
+      </div>
+    )
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:12}}>
+        <h1>Portal RDP</h1>
+        <div>
+          <button onClick={handleLogout}>Cerrar sesión</button>
+        </div>
       </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+      <UserDashboard />
+    </div>
   )
 }
 
