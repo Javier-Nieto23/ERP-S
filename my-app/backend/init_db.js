@@ -111,6 +111,28 @@ async function run() {
       empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL
     )`);
 
+    // Equipment census requests from clients
+    await query(`CREATE TABLE IF NOT EXISTS equipment_requests (
+      id SERIAL PRIMARY KEY,
+      cliente_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE CASCADE,
+      empresa_id INTEGER,
+      marca VARCHAR(150),
+      modelo VARCHAR(150),
+      no_serie VARCHAR(200),
+      codigo_registro VARCHAR(150),
+      memoria_ram VARCHAR(50),
+      disco_duro VARCHAR(100),
+      serie_disco_duro VARCHAR(200),
+      sistema_operativo VARCHAR(120),
+      procesador VARCHAR(150),
+      nombre_usuario_equipo VARCHAR(150),
+      tipo_equipo VARCHAR(120),
+      nombre_equipo VARCHAR(150),
+      status VARCHAR(50) DEFAULT 'pendiente',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      agendado BOOLEAN DEFAULT false
+    )`);
+
     // add FK from empresas.id_documento to documentos.id if present
     await query(`ALTER TABLE IF EXISTS empresas ADD COLUMN IF NOT EXISTS documento_id INTEGER`);
     await query(`UPDATE empresas SET documento_id = id_documento WHERE FALSE`)
