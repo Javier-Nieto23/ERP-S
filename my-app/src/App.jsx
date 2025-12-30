@@ -58,9 +58,6 @@ function App() {
       <div>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:12}}>
           <h1>Portal RDP</h1>
-          <div>
-            <button onClick={handleLogout}>Cerrar sesión</button>
-          </div>
         </div>
         <ClientDashboard />
       </div>

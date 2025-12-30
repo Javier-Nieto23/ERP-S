@@ -43,17 +43,24 @@ async function run() {
     // Documentos
     await query(`CREATE TABLE IF NOT EXISTS documentos (
       id SERIAL PRIMARY KEY,
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE CASCADE,
       csf VARCHAR(255),
       cd VARCHAR(255),
       rt VARCHAR(255),
-      cot VARCHAR(255)
+      cot VARCHAR(255),
+      archivo_responsiva VARCHAR(500)
     )`);
+
+    // Agregar columnas a documentos si no existen
+    await query(`ALTER TABLE documentos ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id) ON DELETE CASCADE`).catch(() => {});
+    await query(`ALTER TABLE documentos ADD COLUMN IF NOT EXISTS archivo_responsiva VARCHAR(500)`).catch(() => {});
 
     // Equipos
     await query(`CREATE TABLE IF NOT EXISTS equipos (
       id SERIAL PRIMARY KEY,
       id_equipo VARCHAR(150) UNIQUE,
       empleado_id INTEGER REFERENCES empleados(id) ON DELETE SET NULL,
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL,
       tipo_equipo VARCHAR(120),
       marca VARCHAR(120),
       modelo VARCHAR(120),
@@ -64,6 +71,9 @@ async function run() {
       disco_duro VARCHAR(100),
       codigo_registro VARCHAR(150)
     )`);
+
+    // Agregar columna empresa_id a equipos si no existe
+    await query(`ALTER TABLE equipos ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL`).catch(() => {});
 
     // Codigo Registro
     await query(`CREATE TABLE IF NOT EXISTS codigo_registro (
@@ -96,8 +106,20 @@ async function run() {
       estado VARCHAR(80),
       prioridad VARCHAR(80),
       usuario_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL,
-      agenda_id INTEGER REFERENCES agenda(id) ON DELETE SET NULL
+      agenda_id INTEGER REFERENCES agenda(id) ON DELETE SET NULL,
+      cliente_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE CASCADE,
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL,
+      asunto VARCHAR(250),
+      status VARCHAR(80),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    // Agregar columnas a tickets si no existen
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cliente_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE CASCADE`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS asunto VARCHAR(250)`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS status VARCHAR(80)`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
 
     // Usuarios Empresas (usuarios que pertenecen a una empresa)
     await query(`CREATE TABLE IF NOT EXISTS usuarios_empresas (
@@ -151,6 +173,20 @@ async function run() {
     } else {
       console.log('Admin already exists at', adminEmail);
     }
+
+    // Tickets table
+    await query(`CREATE TABLE IF NOT EXISTS tickets (
+      id SERIAL PRIMARY KEY,
+      cliente_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE CASCADE,
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE CASCADE,
+      asunto VARCHAR(255) NOT NULL,
+      descripcion TEXT NOT NULL,
+      prioridad VARCHAR(50) DEFAULT 'media',
+      status VARCHAR(50) DEFAULT 'abierto',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    console.log('Tickets table created or already exists.');
 
     console.log('DB initialization finished.');
   } catch (err) {

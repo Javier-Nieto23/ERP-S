@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 
 export default function ClientDashboard(){
   const [view, setView] = useState('home')
-  const [form, setForm] = useState({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'' })
+  const [form, setForm] = useState({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' })
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [isPolling, setIsPolling] = useState(false)
@@ -10,6 +10,27 @@ export default function ClientDashboard(){
   const [lastRequestId, setLastRequestId] = useState(null)
   const pollingIntervalRef = useRef(null)
   const pollingTimeoutRef = useRef(null)
+  
+  // Estados para tickets
+  const [tickets, setTickets] = useState([])
+  const [ticketForm, setTicketForm] = useState({ titulo: '', descripcion: '', prioridad: 'media' })
+
+  // Estados para el flujo de censo
+  const [tipoEquipoSeleccionado, setTipoEquipoSeleccionado] = useState('') // 'laptop' o 'escritorio'
+  const [mostrarAvisoLaptop, setMostrarAvisoLaptop] = useState(false)
+  const [archivoResponsiva, setArchivoResponsiva] = useState(null)
+  const [responsaDescargada, setResponsivaDescargada] = useState(false)
+
+  // Estados para empleados
+  const [empleados, setEmpleados] = useState([])
+  const [empleadoForm, setEmpleadoForm] = useState({ id_empleado: '', nombre_empleado: '' })
+  const [empleadoEditando, setEmpleadoEditando] = useState(null)
+
+  // Estados para perfil
+  const [perfil, setPerfil] = useState(null)
+
+  // Estados para equipos
+  const [equipos, setEquipos] = useState([])
 
   async function fetchMyRequests(){
     try{
@@ -69,15 +90,12 @@ export default function ClientDashboard(){
   async function handleDownloadAutoTool(){
     setError(''); setSuccess('')
     try{
-      const token = localStorage.getItem('token')
       const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
       
-      console.log('Descargando herramienta automática...')
+      console.log('Descargando herramienta de detección...')
       
-      // Descargar script con token embebido
-      const res = await fetch(`${API}/download/census-tool-auto`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      // Descargar script sin autenticación
+      const res = await fetch(`${API}/download/census-tool-auto`)
       
       console.log('Respuesta:', res.status, res.statusText)
       
@@ -100,25 +118,7 @@ export default function ClientDashboard(){
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       
-      setSuccess('✓ Archivo censo_equipos.sh descargado.\n\nPara ejecutarlo:\n1. Abre una terminal en la carpeta de descargas\n2. Ejecuta: chmod +x censo_equipos.sh\n3. Ejecuta: ./censo_equipos.sh\n\nEl censo se ejecutará automáticamente...')
-      setIsPolling(true)
-      
-      // Limpiar polling anterior si existe
-      if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current)
-      if(pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current)
-      
-      // Iniciar polling cada 3 segundos
-      pollingIntervalRef.current = setInterval(async ()=>{
-        console.log('Polling: consultando nuevas solicitudes...')
-        await fetchMyRequests()
-      }, 3000)
-      
-      // Detener polling después de 2 minutos
-      pollingTimeoutRef.current = setTimeout(()=>{
-        if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current)
-        setIsPolling(false)
-        setError('Tiempo de espera agotado. Por favor, verifica que ejecutaste la herramienta.')
-      }, 120000)
+      setSuccess('✓ Herramienta para Linux descargada.\n\nPara ejecutarlo:\n1. Abre una terminal en la carpeta de descargas\n2. Ejecuta: chmod +x censo_equipos.sh\n3. Ejecuta: ./censo_equipos.sh\n\nSe generará un archivo .txt. Súbelo usando el botón de carga más abajo.')
       
     }catch(e){
       console.error('Error en handleDownloadAutoTool:', e)
@@ -126,23 +126,214 @@ export default function ClientDashboard(){
     }
   }
 
+  async function handleDownloadWindowsTool(){
+    setError(''); setSuccess('')
+    try{
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      console.log('Descargando herramienta para Windows...')
+      
+      const res = await fetch(`${API}/download/census-tool-windows`)
+      
+      console.log('Respuesta:', res.status, res.statusText)
+      
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error('Error descarga:', errorText)
+        setError('Error al descargar la herramienta: ' + res.status)
+        return
+      }
+      
+      const blob = await res.blob()
+      console.log('Blob creado:', blob.size, 'bytes')
+      
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'censo_equipos.bat'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      
+      setSuccess('✓ Herramienta para Windows descargada.\n\nPara ejecutarlo:\n1. Ve a la carpeta de descargas\n2. Haz doble clic en censo_equipos.bat\n\nSe generará un archivo .txt. Súbelo usando el botón de carga más abajo.')
+      
+    }catch(e){
+      console.error('Error en handleDownloadWindowsTool:', e)
+      setError('Error al descargar la herramienta: ' + e.message)
+    }
+  }
+
+  // Funciones para manejo de tipo de equipo
+  function handleSeleccionEscritorio(){
+    setTipoEquipoSeleccionado('escritorio')
+    setForm({...form, tipo_equipo: 'Escritorio'})
+  }
+
+  function handleSeleccionLaptop(){
+    setMostrarAvisoLaptop(true)
+  }
+
+  async function handleDescargarResponsiva(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/download/responsiva-template`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if(!res.ok) throw new Error('Error al descargar responsiva')
+      
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'responsiva_laptop.docx'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      
+      setResponsivaDescargada(true)
+      setSuccess('✓ Documento descargado. Por favor, llénalo, fírmalo y súbelo.')
+    }catch(e){
+      setError('Error al descargar documento de responsiva')
+    }
+  }
+
+  function handleAceptarAvisoLaptop(){
+    setTipoEquipoSeleccionado('laptop')
+    setForm({...form, tipo_equipo: 'Laptop'})
+    setMostrarAvisoLaptop(false)
+  }
+
+  function handleArchivoResponsivaChange(e){
+    const file = e.target.files[0]
+    if(file){
+      setArchivoResponsiva(file)
+      setSuccess('✓ Archivo de responsiva seleccionado')
+    }
+  }
+
+  function handleFileUpload(e){
+    const file = e.target.files[0]
+    if(!file){
+      setError('No se seleccionó ningún archivo')
+      return
+    }
+    
+    if(!file.name.endsWith('.txt')){
+      setError('Por favor selecciona un archivo .txt')
+      return
+    }
+    
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      try{
+        const content = event.target.result
+        const lines = content.split('\n')
+        const data = {}
+        
+        // Parsear el archivo txt
+        lines.forEach(line => {
+          if(line.includes('=')){
+            const [key, value] = line.split('=')
+            if(key && value){
+              data[key.trim()] = value.trim()
+            }
+          }
+        })
+        
+        console.log('Datos parseados:', data)
+        
+        // Llenar formulario con los datos del archivo
+        setForm({
+          marca: data.marca || '',
+          modelo: data.modelo || '',
+          no_serie: data.no_serie || '',
+          codigo_registro: '',
+          memoria_ram: data.memoria_ram || '',
+          disco_duro: data.disco_duro || '',
+          serie_disco_duro: data.serie_disco_duro || '',
+          sistema_operativo: data.sistema_operativo || '',
+          procesador: data.procesador || '',
+          nombre_usuario_equipo: data.nombre_usuario_equipo || '',
+          tipo_equipo: data.tipo_equipo || '',
+          nombre_equipo: data.nombre_equipo || ''
+        })
+        
+        setSuccess('✓ Archivo cargado correctamente. Los datos se han llenado en el formulario.')
+        setError('')
+        
+      }catch(err){
+        console.error('Error al parsear archivo:', err)
+        setError('Error al leer el archivo. Asegúrate de que sea el archivo generado por la herramienta.')
+      }
+    }
+    
+    reader.onerror = () => {
+      setError('Error al leer el archivo')
+    }
+    
+    reader.readAsText(file)
+  }
+
+  function handleClearForm(){
+    setForm({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'' })
+    setError('')
+    setSuccess('✓ Formulario limpiado')
+  }
+
   async function handleCensusSubmit(e){
     e.preventDefault(); setError(''); setSuccess('')
+    
+    // Validar que si es laptop, se haya subido el archivo de responsiva
+    if(form.tipo_equipo === 'Laptop' && !archivoResponsiva){
+      setError('Debes subir el archivo de responsiva firmado para laptops')
+      return
+    }
+    
     try{
       const token = localStorage.getItem('token')
       const user = JSON.parse(localStorage.getItem('user'))
       const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      // Crear FormData para enviar archivo y datos
+      const formData = new FormData()
+      formData.append('marca', form.marca)
+      formData.append('modelo', form.modelo)
+      formData.append('no_serie', form.no_serie)
+      formData.append('codigo_registro', form.codigo_registro)
+      formData.append('memoria_ram', form.memoria_ram)
+      formData.append('disco_duro', form.disco_duro)
+      formData.append('serie_disco_duro', form.serie_disco_duro)
+      formData.append('sistema_operativo', form.sistema_operativo)
+      formData.append('procesador', form.procesador)
+      formData.append('nombre_usuario_equipo', form.nombre_usuario_equipo)
+      formData.append('tipo_equipo', form.tipo_equipo)
+      formData.append('nombre_equipo', form.nombre_equipo)
+      formData.append('empresa_id', user.empresa_id)
+      
+      // Agregar archivo de responsiva si existe
+      if(archivoResponsiva){
+        formData.append('responsiva', archivoResponsiva)
+      }
+      
       const res = await fetch(`${API}/equipment-requests`, {
-        method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ ...form, empresa_id: user.empresa_id })
+        method:'POST', 
+        headers:{ Authorization:`Bearer ${token}` },
+        body: formData
       })
       const data = await res.json()
       if (!res.ok) return setError(data.error || 'Error al solicitar censo')
       
       setSuccess('✓ Solicitud enviada exitosamente. Puedes censar otro equipo.')
       
-      // Limpiar formulario
+      // Limpiar formulario y estados
       setForm({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'' })
+      setTipoEquipoSeleccionado('')
+      setArchivoResponsiva(null)
+      setResponsivaDescargada(false)
       
       // Actualizar lista de solicitudes
       await fetchMyRequests()
@@ -155,15 +346,190 @@ export default function ClientDashboard(){
   
   // Cargar solicitudes al montar y cambiar vista
   useEffect(()=>{
-    if(view==='census') fetchMyRequests()
+    if(view==='census') {
+      fetchMyRequests()
+      fetchEmpleados() // Cargar empleados para el combobox
+    }
+    if(view==='tickets') fetchTickets()
+    if(view==='empleados') fetchEmpleados()
+    if(view==='perfil') fetchPerfil()
+    if(view==='equipos') fetchEquipos()
   }, [view])
+
+  async function fetchTickets(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/mine`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setTickets(data.tickets || [])
+      }
+    }catch(e){ console.error('Error fetching tickets', e) }
+  }
+
+  // ==================== EMPLEADOS ====================
+  
+  async function fetchEmpleados(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/empleados`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setEmpleados(data.empleados || [])
+      }
+    }catch(e){ console.error('Error fetching empleados', e) }
+  }
+
+  async function handleEmpleadoSubmit(e){
+    e.preventDefault(); setError(''); setSuccess('')
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      if(empleadoEditando){
+        // Actualizar empleado existente
+        const res = await fetch(`${API}/empleados/${empleadoEditando.id}`, {
+          method:'PUT',
+          headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+          body: JSON.stringify(empleadoForm)
+        })
+        const data = await res.json()
+        if (!res.ok) return setError(data.error || 'Error al actualizar empleado')
+        setSuccess('✓ Empleado actualizado exitosamente')
+      } else {
+        // Crear nuevo empleado
+        const res = await fetch(`${API}/empleados`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+          body: JSON.stringify(empleadoForm)
+        })
+        const data = await res.json()
+        if (!res.ok) return setError(data.error || 'Error al crear empleado')
+        setSuccess('✓ Empleado registrado exitosamente')
+      }
+      
+      setEmpleadoForm({ id_empleado: '', nombre_empleado: '' })
+      setEmpleadoEditando(null)
+      await fetchEmpleados()
+    }catch(e){ setError('Error de conexión') }
+  }
+
+  function handleEditarEmpleado(empleado){
+    setEmpleadoEditando(empleado)
+    setEmpleadoForm({ id_empleado: empleado.id_empleado, nombre_empleado: empleado.nombre_empleado })
+    window.scrollTo(0, 0)
+  }
+
+  function handleCancelarEdicion(){
+    setEmpleadoEditando(null)
+    setEmpleadoForm({ id_empleado: '', nombre_empleado: '' })
+    setError('')
+  }
+
+  async function handleEliminarEmpleado(id){
+    if(!confirm('¿Estás seguro de eliminar este empleado?')) return
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/empleados/${id}`, {
+        method:'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      const data = await res.json()
+      if (!res.ok) return setError(data.error || 'Error al eliminar empleado')
+      setSuccess('✓ Empleado eliminado exitosamente')
+      await fetchEmpleados()
+    }catch(e){ setError('Error de conexión') }
+  }
+
+  // ==================== PERFIL ====================
+  
+  async function fetchPerfil(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/perfil`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setPerfil(data.perfil || null)
+      }
+    }catch(e){ console.error('Error fetching perfil', e) }
+  }
+
+  async function fetchEquipos(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/equipos`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setEquipos(data.equipos || [])
+      }
+    }catch(e){ console.error('Error fetching equipos', e) }
+  }
+
+  async function handleTicketSubmit(e){
+    e.preventDefault(); setError(''); setSuccess('')
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets`, {
+        method:'POST', 
+        headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+        body: JSON.stringify(ticketForm)
+      })
+      const data = await res.json()
+      if (!res.ok) return setError(data.error || 'Error al crear ticket')
+      setSuccess('✓ Ticket creado exitosamente')
+      setTicketForm({ asunto: '', descripcion: '', prioridad: 'media' })
+      await fetchTickets()
+    }catch(e){ setError('Error de conexión') }
+  }
 
   return (
     <div style={{display:'flex',height:'calc(100vh - 80px)'}}>
-      <div style={{width:200,background:'#1e293b',padding:16,color:'white'}}>
+      <div style={{width:200,background:'#1e293b',padding:16,color:'white',display:'flex',flexDirection:'column'}}>
         <h3 style={{margin:'0 0 16px 0',fontSize:16}}>Menú</h3>
         <button onClick={()=>setView('home')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='home'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Inicio</button>
+        <button onClick={()=>setView('perfil')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='perfil'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>👤 Mi Perfil</button>
+        <button onClick={()=>setView('empleados')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='empleados'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Empleados</button>
+        <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos</button>
         <button onClick={()=>setView('census')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='census'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Censar Equipo</button>
+        <button onClick={()=>setView('tickets')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='tickets'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Tickets</button>
+        
+        {/* Botón de cerrar sesión al final */}
+        <button 
+          onClick={()=>{
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = '/';
+          }} 
+          style={{
+            display:'block',
+            width:'100%',
+            padding:8,
+            marginTop:'auto',
+            background:'#ef4444',
+            border:'none',
+            color:'white',
+            textAlign:'left',
+            cursor:'pointer',
+            borderRadius:4,
+            fontWeight:600
+          }}
+        >
+          🚪 Cerrar Sesión
+        </button>
       </div>
       <div style={{flex:1,padding:24,overflow:'auto'}}>
         {view==='home' && (
@@ -172,59 +538,395 @@ export default function ClientDashboard(){
             <p>Bienvenido al portal. Usa el menú lateral para censar equipos.</p>
           </div>
         )}
+        {view==='perfil' && (
+          <div>
+            <h2>Mi Perfil</h2>
+            
+            {perfil ? (
+              <div style={{maxWidth:900}}>
+                {/* Información del Usuario */}
+                <div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,padding:24,marginBottom:24}}>
+                  <h3 style={{margin:'0 0 20px 0',fontSize:20,color:'#1e293b',borderBottom:'2px solid #3b82f6',paddingBottom:8}}>
+                    👤 Información Personal
+                  </h3>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Nombre</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.nombre_usuario} {perfil.apellido_usuario}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>ID Usuario</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.id_usuario || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Email</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.email}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Perfil</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.nombre_profile || 'N/A'}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Información de la Empresa */}
+                <div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,padding:24}}>
+                  <h3 style={{margin:'0 0 20px 0',fontSize:20,color:'#1e293b',borderBottom:'2px solid #10b981',paddingBottom:8}}>
+                    🏢 Información de la Empresa
+                  </h3>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Nombre de la Empresa</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.nombre_empresa || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>ID Empresa</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.id_empresa || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>RFC</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.rfc || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Días Asignados</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.dias_asignados || 'N/A'}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Total de Equipos</div>
+                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.total_equipos !== undefined ? perfil.total_equipos : 'N/A'}</div>
+                    </div>
+                    {perfil.fecha_pago && (
+                      <div style={{gridColumn:'1 / -1'}}>
+                        <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Fecha de Pago</div>
+                        <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>
+                          {new Date(perfil.fecha_pago).toLocaleDateString('es-ES')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                <p style={{color:'#64748b',margin:0}}>Cargando perfil...</p>
+              </div>
+            )}
+          </div>
+        )}
+        {view==='equipos' && (
+          <div>
+            <h2>📦 Equipos de la Empresa</h2>
+            
+            {equipos.length === 0 ? (
+              <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                <p style={{color:'#64748b',margin:0}}>No hay equipos registrados</p>
+              </div>
+            ) : (
+              <div style={{overflowX:'auto'}}>
+                <table style={{width:'100%',borderCollapse:'collapse',background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
+                  <thead>
+                    <tr style={{background:'#f1f5f9'}}>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>ID Equipo</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Tipo</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Sistema Op.</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Procesador</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>RAM</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {equipos.map((eq) => (
+                      <tr key={eq.id} style={{borderBottom:'1px solid #f1f5f9'}}>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.id_equipo || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#64748b',fontSize:12}}>{eq.numero_serie || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.sistema_operativo || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#64748b',fontSize:12}}>{eq.procesador || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.ram || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
+                          {eq.nombre_empleado ? (
+                            <div>
+                              <div style={{fontWeight:600}}>{eq.nombre_empleado}</div>
+                              <div style={{fontSize:12,color:'#64748b'}}>{eq.id_empleado}</div>
+                            </div>
+                          ) : 'Sin asignar'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        {view==='empleados' && (
+          <div>
+            <h2>Gestión de Empleados</h2>
+            
+            {/* Formulario para crear/editar empleado */}
+            <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:20,marginBottom:24,maxWidth:700}}>
+              <h3 style={{margin:'0 0 16px 0',fontSize:18,color:'#1e293b'}}>
+                {empleadoEditando ? '✏️ Editar Empleado' : '➕ Registrar Nuevo Empleado'}
+              </h3>
+              <form onSubmit={handleEmpleadoSubmit}>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 2fr',gap:12,marginBottom:16}}>
+                  <label style={{display:'block'}}>
+                    ID Empleado *
+                    <input 
+                      required 
+                      value={empleadoForm.id_empleado} 
+                      onChange={e=>setEmpleadoForm({...empleadoForm,id_empleado:e.target.value})} 
+                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4}}
+                      placeholder="Ej: EMP001"
+                    />
+                  </label>
+                  
+                  <label style={{display:'block'}}>
+                    Nombre Completo *
+                    <input 
+                      required 
+                      value={empleadoForm.nombre_empleado} 
+                      onChange={e=>setEmpleadoForm({...empleadoForm,nombre_empleado:e.target.value})} 
+                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4}}
+                      placeholder="Ej: Juan Pérez García"
+                    />
+                  </label>
+                </div>
+                
+                {error && <div style={{color:'#ff6b6b',marginBottom:12}}>{error}</div>}
+                {success && <div style={{color:'#51cf66',marginBottom:12}}>{success}</div>}
+                
+                <div style={{display:'flex',gap:12}}>
+                  <button type='submit' style={{padding:'10px 24px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>
+                    {empleadoEditando ? '💾 Guardar Cambios' : '➕ Registrar Empleado'}
+                  </button>
+                  {empleadoEditando && (
+                    <button type='button' onClick={handleCancelarEdicion} style={{padding:'10px 24px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+            
+            {/* Lista de empleados */}
+            <div style={{maxWidth:900}}>
+              <h3 style={{fontSize:18,marginBottom:16,color:'#1e293b'}}>📋 Lista de Empleados</h3>
+              {empleados.length === 0 ? (
+                <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                  <p style={{color:'#64748b',margin:0}}>No hay empleados registrados aún</p>
+                </div>
+              ) : (
+                <div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,overflow:'hidden'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead>
+                      <tr style={{background:'#f1f5f9',borderBottom:'2px solid #e2e8f0'}}>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569'}}>ID Empleado</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569'}}>Nombre</th>
+                        <th style={{padding:12,textAlign:'center',fontSize:14,fontWeight:600,color:'#475569'}}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {empleados.map(empleado=>(
+                        <tr key={empleado.id} style={{borderBottom:'1px solid #e2e8f0'}}>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b',fontWeight:600}}>{empleado.id_empleado}</td>
+                          <td style={{padding:12,fontSize:14,color:'#475569'}}>{empleado.nombre_empleado}</td>
+                          <td style={{padding:12,textAlign:'center'}}>
+                            <button 
+                              onClick={()=>handleEditarEmpleado(empleado)}
+                              style={{padding:'6px 12px',background:'#3b82f6',color:'white',border:'none',borderRadius:4,cursor:'pointer',fontSize:13,marginRight:8}}
+                            >
+                              ✏️ Editar
+                            </button>
+                            <button 
+                              onClick={()=>handleEliminarEmpleado(empleado.id)}
+                              style={{padding:'6px 12px',background:'#ef4444',color:'white',border:'none',borderRadius:4,cursor:'pointer',fontSize:13}}
+                            >
+                              🗑️ Eliminar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {view==='census' && (
           <div>
             <h2>Solicitar Censo de Equipo</h2>
             
-            {/* Censo Automático */}
-            <div style={{background:'#f0fdf4',border:'2px solid #10b981',borderRadius:8,padding:20,marginBottom:20,maxWidth:700}}>
-              <h3 style={{margin:'0 0 8px 0',fontSize:18,color:'#047857'}}>⚡ Censo Automático (Recomendado)</h3>
-              <p style={{margin:'0 0 16px 0',fontSize:14,color:'#065f46'}}>La forma más rápida y precisa. El software detecta automáticamente todo el hardware.</p>
-              <button type='button' onClick={handleDownloadAutoTool} disabled={isPolling} style={{padding:'12px 24px',background:isPolling?'#94a3b8':'#10b981',color:'white',border:'none',borderRadius:6,cursor:isPolling?'not-allowed':'pointer',fontSize:15,fontWeight:600}}>
-                {isPolling ? '⏳ Esperando datos del software...' : '🚀 Descargar y Ejecutar Censo Automático'}
-              </button>
-              {isPolling && (
-                <div style={{marginTop:16,padding:16,background:'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',borderRadius:8,color:'white'}}>
-                  <div style={{display:'flex',alignItems:'center',marginBottom:12}}>
-                    <div style={{width:40,height:40,border:'4px solid rgba(255,255,255,0.3)',borderTop:'4px solid white',borderRadius:'50%',animation:'spin 1s linear infinite',marginRight:12}}></div>
-                    <div>
-                      <div style={{fontSize:16,fontWeight:600}}>🔍 Leyendo componentes del equipo...</div>
-                      <div style={{fontSize:12,opacity:0.9,marginTop:4}}>Por favor ejecuta el archivo censo_equipos.sh</div>
-                    </div>
+            {/* Selección de tipo de equipo */}
+            {!tipoEquipoSeleccionado && (
+              <div style={{maxWidth:700,margin:'40px auto',textAlign:'center'}}>
+                <h3 style={{fontSize:24,marginBottom:16,color:'#1e293b'}}>¿Qué tipo de equipo vas a censar?</h3>
+                <p style={{fontSize:16,color:'#64748b',marginBottom:32}}>Selecciona el tipo de equipo para continuar</p>
+                
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
+                  <div 
+                    onClick={handleSeleccionEscritorio}
+                    style={{
+                      padding:40,
+                      background:'white',
+                      border:'3px solid #e2e8f0',
+                      borderRadius:16,
+                      cursor:'pointer',
+                      transition:'all 0.3s'
+                    }}
+                    onMouseOver={(e)=>{e.currentTarget.style.transform='scale(1.05)';e.currentTarget.style.borderColor='#3b82f6';e.currentTarget.style.boxShadow='0 10px 30px rgba(59,130,246,0.3)'}}
+                    onMouseOut={(e)=>{e.currentTarget.style.transform='scale(1)';e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}
+                  >
+                    <div style={{fontSize:80,marginBottom:16}}>🖥️</div>
+                    <div style={{fontSize:22,fontWeight:600,color:'#1e293b',marginBottom:8}}>Equipo de Escritorio</div>
+                    <div style={{fontSize:14,color:'#64748b'}}>PC de escritorio, torre, workstation</div>
                   </div>
-                  <div style={{fontSize:13,opacity:0.95,lineHeight:1.6}}>
-                    <div>✓ Detectando procesador, memoria RAM y disco duro...</div>
-                    <div>✓ Identificando sistema operativo...</div>
-                    <div>✓ Recopilando números de serie...</div>
+                  
+                  <div 
+                    onClick={handleSeleccionLaptop}
+                    style={{
+                      padding:40,
+                      background:'white',
+                      border:'3px solid #e2e8f0',
+                      borderRadius:16,
+                      cursor:'pointer',
+                      transition:'all 0.3s'
+                    }}
+                    onMouseOver={(e)=>{e.currentTarget.style.transform='scale(1.05)';e.currentTarget.style.borderColor='#10b981';e.currentTarget.style.boxShadow='0 10px 30px rgba(16,185,129,0.3)'}}
+                    onMouseOut={(e)=>{e.currentTarget.style.transform='scale(1)';e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}
+                  >
+                    <div style={{fontSize:80,marginBottom:16}}>💻</div>
+                    <div style={{fontSize:22,fontWeight:600,color:'#1e293b',marginBottom:8}}>Laptop</div>
+                    <div style={{fontSize:14,color:'#64748b'}}>Portátil, notebook, ultrabook</div>
                   </div>
-                  <style>{
-                    `@keyframes spin {
-                      0% { transform: rotate(0deg); }
-                      100% { transform: rotate(360deg); }
-                    }`
-                  }</style>
-                </div>
-              )}
-            </div>
-            
-            {/* Mis Solicitudes Recientes */}
-            {myRequests.length > 0 && (
-              <div style={{background:'#fff',border:'1px solid #e2e8f0',borderRadius:8,padding:16,marginBottom:20,maxWidth:700}}>
-                <h3 style={{margin:'0 0 12px 0',fontSize:16,color:'#1e293b'}}>📋 Mis Solicitudes Recientes</h3>
-                <div style={{maxHeight:200,overflow:'auto'}}>
-                  {myRequests.slice(0,3).map(req=>(
-                    <div key={req.id} style={{padding:12,marginBottom:8,background:'#f8fafc',borderRadius:4,borderLeft:'3px solid #10b981'}}>
-                      <div style={{fontSize:13,color:'#334155',marginBottom:4}}><strong>{req.marca} {req.modelo}</strong> - {req.tipo_equipo}</div>
-                      <div style={{fontSize:11,color:'#64748b'}}>Serie: {req.no_serie} | {new Date(req.created_at).toLocaleString()}</div>
-                    </div>
-                  ))}
                 </div>
               </div>
             )}
+
+            {/* Modal de aviso para laptops */}
+            {mostrarAvisoLaptop && (
+              <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+                <div style={{background:'white',borderRadius:16,padding:32,maxWidth:600,width:'90%',boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+                  <h3 style={{fontSize:24,marginBottom:16,color:'#1e293b'}}>📋 Documento de Responsiva Requerido</h3>
+                  <p style={{fontSize:16,color:'#475569',marginBottom:24,lineHeight:1.6}}>
+                    Para censar una laptop, es necesario descargar, llenar y firmar un documento de responsiva. 
+                    Este documento establece las responsabilidades del usuario respecto al equipo asignado.
+                  </p>
+                  
+                  <div style={{background:'#fef3c7',border:'2px solid #f59e0b',borderRadius:8,padding:16,marginBottom:24}}>
+                    <p style={{margin:0,fontSize:14,color:'#92400e'}}>
+                      <strong>⚠️ Importante:</strong> Después de descargar el documento, deberás llenarlo con los datos del equipo, 
+                      firmarlo y subirlo en el siguiente paso.
+                    </p>
+                  </div>
+
+                  {!responsaDescargada ? (
+                    <button 
+                      onClick={handleDescargarResponsiva}
+                      style={{width:'100%',padding:'14px 24px',background:'#3b82f6',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontSize:16,fontWeight:600,marginBottom:12}}
+                    >
+                      📥 Descargar Documento de Responsiva
+                    </button>
+                  ) : (
+                    <div style={{marginBottom:12}}>
+                      <div style={{padding:12,background:'#d1fae5',borderRadius:8,marginBottom:12,textAlign:'center',color:'#065f46'}}>
+                        ✓ Documento descargado
+                      </div>
+                      <button 
+                        onClick={handleAceptarAvisoLaptop}
+                        style={{width:'100%',padding:'14px 24px',background:'#10b981',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontSize:16,fontWeight:600,marginBottom:12}}
+                      >
+                        ✓ Continuar con el Censo
+                      </button>
+                    </div>
+                  )}
+                  
+                  <button 
+                    onClick={()=>{setMostrarAvisoLaptop(false);setResponsivaDescargada(false)}}
+                    style={{width:'100%',padding:'12px 24px',background:'#64748b',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontSize:14}}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Formulario de censo (solo visible después de seleccionar tipo) */}
+            {tipoEquipoSeleccionado && (
+              <>
+                {/* Botón para volver a la selección */}
+                <div style={{marginBottom:20}}>
+                  <button 
+                    onClick={()=>{
+                      setTipoEquipoSeleccionado('');
+                      setArchivoResponsiva(null);
+                      setResponsivaDescargada(false);
+                      setForm({...form, tipo_equipo:''});
+                    }}
+                    style={{padding:'10px 20px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:14,fontWeight:600,display:'flex',alignItems:'center',gap:8}}
+                  >
+                    ← Volver a selección de tipo de equipo
+                  </button>
+                </div>
+
+                {/* Censo Automático */}
+                <div style={{background:'#f0fdf4',border:'2px solid #10b981',borderRadius:8,padding:20,marginBottom:20,maxWidth:700}}>
+                  <h3 style={{margin:'0 0 8px 0',fontSize:18,color:'#047857'}}>⚡ Censo Automático (Recomendado)</h3>
+                  <p style={{margin:'0 0 16px 0',fontSize:14,color:'#065f46'}}>Descarga la herramienta para tu sistema operativo, ejecútala y sube el archivo .txt generado.</p>
+                  
+                  <div style={{display:'flex',gap:12,marginBottom:16}}>
+                    <button type='button' onClick={handleDownloadWindowsTool} style={{flex:1,padding:'12px 24px',background:'#0ea5e9',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:15,fontWeight:600}}>
+                      🪟 Windows (.bat)
+                    </button>
+                    <button type='button' onClick={handleDownloadAutoTool} style={{flex:1,padding:'12px 24px',background:'#10b981',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:15,fontWeight:600}}>
+                      🐧 Linux (.sh)
+                    </button>
+                  </div>
+                  
+                  {/* Campo para subir archivo txt */}
+                  <div style={{marginTop:16,padding:16,background:'#e0f2fe',borderRadius:8,border:'2px dashed #0284c7'}}>
+                    <label style={{display:'block',marginBottom:8,fontSize:14,fontWeight:600,color:'#0c4a6e'}}>
+                      📁 Cargar archivo de censo (.txt)
+                    </label>
+                    <input 
+                      type='file' 
+                      accept='.txt' 
+                      onChange={handleFileUpload}
+                      style={{width:'100%',padding:8,fontSize:14,border:'1px solid #0284c7',borderRadius:4,background:'white',cursor:'pointer'}}
+                    />
+                    <p style={{margin:'8px 0 0 0',fontSize:12,color:'#075985'}}>Selecciona el archivo .txt generado por la herramienta de censo</p>
+                  </div>
+                </div>
+
+                {/* Mostrar campo para subir responsiva si es laptop */}
+                {tipoEquipoSeleccionado === 'laptop' && (
+                  <div style={{background:'#fef3c7',border:'2px solid #f59e0b',borderRadius:8,padding:20,marginBottom:20,maxWidth:700}}>
+                    <h3 style={{margin:'0 0 8px 0',fontSize:18,color:'#92400e'}}>📄 Documento de Responsiva Firmado</h3>
+                    <p style={{margin:'0 0 16px 0',fontSize:14,color:'#78350f'}}>Por favor, sube el documento de responsiva que descargaste, llenaste y firmaste.</p>
+                    
+                    <input 
+                      type='file' 
+                      accept='.txt,.pdf,.jpg,.jpeg,.png' 
+                      onChange={handleArchivoResponsivaChange}
+                      style={{width:'100%',padding:10,fontSize:14,border:'1px solid #f59e0b',borderRadius:4,background:'white',cursor:'pointer'}}
+                    />
+                    {archivoResponsiva && (
+                      <div style={{marginTop:12,padding:10,background:'#d1fae5',borderRadius:6,color:'#065f46',fontSize:14}}>
+                        ✓ Archivo seleccionado: {archivoResponsiva.name}
+                      </div>
+                    )}
+                  </div>
+                )}
             
-            {/* Formulario Manual */}
-            <h3 style={{fontSize:18,marginBottom:12,marginTop:32}}>Formulario Manual</h3>
-            <form onSubmit={handleCensusSubmit} style={{maxWidth:600}}>
+                {/* Formulario Manual */}
+                <h3 style={{fontSize:18,marginBottom:12,marginTop:32}}>Formulario Manual</h3>
+                <form onSubmit={handleCensusSubmit} style={{maxWidth:600}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <label>Marca *<br/><input required value={form.marca} onChange={e=>setForm({...form,marca:e.target.value})} style={{width:'100%',padding:8}} /></label>
                 <label>Modelo *<br/><input required value={form.modelo} onChange={e=>setForm({...form,modelo:e.target.value})} style={{width:'100%',padding:8}} /></label>
@@ -235,14 +937,180 @@ export default function ClientDashboard(){
                 <label>Serie Disco Duro<br/><input value={form.serie_disco_duro} onChange={e=>setForm({...form,serie_disco_duro:e.target.value})} style={{width:'100%',padding:8}} /></label>
                 <label>Sistema Operativo<br/><input value={form.sistema_operativo} onChange={e=>setForm({...form,sistema_operativo:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Windows 11" /></label>
                 <label>Procesador<br/><input value={form.procesador} onChange={e=>setForm({...form,procesador:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Intel i5" /></label>
-                <label>Nombre Usuario (Empleado)<br/><input value={form.nombre_usuario_equipo} onChange={e=>setForm({...form,nombre_usuario_equipo:e.target.value})} style={{width:'100%',padding:8}} /></label>
+                <label>
+                  Empleado Asignado *
+                  <br/>
+                  <select 
+                    required
+                    value={form.empleado_id} 
+                    onChange={e=>{
+                      const selectedEmp = empleados.find(emp => emp.id === parseInt(e.target.value));
+                      setForm({
+                        ...form, 
+                        empleado_id: e.target.value,
+                        nombre_usuario_equipo: selectedEmp ? selectedEmp.nombre_empleado : ''
+                      });
+                    }} 
+                    style={{width:'100%',padding:8,border:'1px solid #cbd5e1',borderRadius:4}}
+                  >
+                    <option value="">-- Seleccionar Empleado --</option>
+                    {empleados.map(emp=>(
+                      <option key={emp.id} value={emp.id}>
+                        {emp.id_empleado} - {emp.nombre_empleado}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label>Tipo de Equipo<br/><input value={form.tipo_equipo} onChange={e=>setForm({...form,tipo_equipo:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Laptop, Desktop" /></label>
                 <label>Nombre de Equipo<br/><input value={form.nombre_equipo} onChange={e=>setForm({...form,nombre_equipo:e.target.value})} style={{width:'100%',padding:8}} /></label>
               </div>
               {error && <div style={{color:'#ff6b6b',marginTop:12}}>{error}</div>}
               {success && <div style={{color:'#51cf66',marginTop:12}}>{success}</div>}
-              <button type='submit' style={{marginTop:16,padding:'10px 20px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer'}}>Enviar Solicitud</button>
+              <div style={{display:'flex',gap:12,marginTop:16}}>
+                <button type='submit' style={{flex:1,padding:'10px 20px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>Enviar Solicitud</button>
+                <button type='button' onClick={handleClearForm} style={{padding:'10px 20px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>🗑️ Limpiar</button>
+              </div>
             </form>
+            </>
+            )}
+          </div>
+        )}
+        {view==='tickets' && (
+          <div>
+            <h2>Mis Tickets de Soporte</h2>
+            
+            {/* Crear nuevo ticket */}
+            <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:20,marginBottom:24}}>
+              <h3 style={{margin:'0 0 16px 0',fontSize:18,color:'#1e293b'}}>🎫 Crear Nuevo Ticket</h3>
+              
+              {!ticketForm.titulo ? (
+                <>
+                  <p style={{color:'#64748b',marginBottom:20}}>Selecciona el tipo de problema que estás experimentando:</p>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:16,marginBottom:24}}>
+                    {[
+                      {titulo:'Problema de Internet',emoji:'🌐',color:'#3b82f6',desc:'Sin conexión o conexión lenta'},
+                      {titulo:'Equipo no Enciende',emoji:'💻',color:'#ef4444',desc:'El equipo no arranca'},
+                      {titulo:'Problema de Impresora',emoji:'🖨️',color:'#8b5cf6',desc:'No imprime o atascos de papel'},
+                      {titulo:'Software no Funciona',emoji:'⚠️',color:'#f59e0b',desc:'Error en programas o aplicaciones'},
+                      {titulo:'Problemas de Correo',emoji:'📧',color:'#06b6d4',desc:'No puedo enviar o recibir emails'},
+                      {titulo:'Contraseña Bloqueada',emoji:'🔒',color:'#ec4899',desc:'Olvidé mi contraseña'},
+                      {titulo:'Virus o Malware',emoji:'🦠',color:'#dc2626',desc:'Sospecha de virus o comportamiento extraño'},
+                      {titulo:'Pantalla con Problemas',emoji:'🖥️',color:'#14b8a6',desc:'Pantalla no se ve bien'},
+                      {titulo:'Teclado o Mouse',emoji:'⌨️',color:'#6366f1',desc:'No responden o funcionan mal'},
+                      {titulo:'Solicitud de Software',emoji:'📦',color:'#10b981',desc:'Necesito instalar un programa'},
+                      {titulo:'Acceso a Carpetas',emoji:'📁',color:'#f97316',desc:'No puedo acceder a archivos compartidos'},
+                      {titulo:'Otro Problema',emoji:'❓',color:'#64748b',desc:'Un problema diferente'}
+                    ].map((problema,idx)=>(
+                      <div 
+                        key={idx}
+                        onClick={()=>setTicketForm({...ticketForm,titulo:problema.titulo})}
+                        style={{
+                          background:'white',
+                          border:'2px solid #e2e8f0',
+                          borderRadius:12,
+                          padding:20,
+                          textAlign:'center',
+                          cursor:'pointer',
+                          transition:'all 0.2s',
+                          ':hover':{transform:'translateY(-2px)',borderColor:problema.color}
+                        }}
+                        onMouseOver={(e)=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.borderColor=problema.color;e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'}}
+                        onMouseOut={(e)=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}
+                      >
+                        <div style={{fontSize:48,marginBottom:12}}>{problema.emoji}</div>
+                        <div style={{fontWeight:600,color:'#1e293b',fontSize:15,marginBottom:8}}>{problema.titulo}</div>
+                        <div style={{fontSize:12,color:'#64748b',lineHeight:1.4}}>{problema.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <form onSubmit={handleTicketSubmit}>
+                  <div style={{background:'#dbeafe',border:'2px solid #3b82f6',borderRadius:8,padding:16,marginBottom:16}}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <div>
+                        <div style={{fontSize:13,color:'#1e40af',marginBottom:4}}>Problema seleccionado:</div>
+                        <div style={{fontSize:18,fontWeight:600,color:'#1e293b'}}>{ticketForm.titulo}</div>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={()=>setTicketForm({titulo:'',descripcion:'',prioridad:'media'})}
+                        style={{padding:'8px 16px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:13}}
+                      >
+                        ← Cambiar
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <label style={{display:'block',marginBottom:12}}>
+                    Descripción Detallada *
+                    <textarea 
+                      required 
+                      value={ticketForm.descripcion} 
+                      onChange={e=>setTicketForm({...ticketForm,descripcion:e.target.value})} 
+                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4,minHeight:120,fontFamily:'inherit'}}
+                      placeholder="Describe con más detalle el problema que estás experimentando"
+                    />
+                  </label>
+                  
+                  <label style={{display:'block',marginBottom:16}}>
+                    Prioridad
+                    <select 
+                      value={ticketForm.prioridad} 
+                      onChange={e=>setTicketForm({...ticketForm,prioridad:e.target.value})} 
+                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4}}
+                    >
+                      <option value="baja">Baja</option>
+                      <option value="media">Media</option>
+                      <option value="alta">Alta</option>
+                      <option value="urgente">Urgente</option>
+                    </select>
+                  </label>
+                  
+                  {error && <div style={{color:'#ff6b6b',marginBottom:12}}>{error}</div>}
+                  {success && <div style={{color:'#51cf66',marginBottom:12}}>{success}</div>}
+                  
+                  <button type='submit' style={{padding:'10px 24px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>
+                    📤 Enviar Ticket
+                  </button>
+                </form>
+              )}
+            </div>
+            
+            {/* Lista de tickets */}
+            <div style={{maxWidth:900}}>
+              <h3 style={{fontSize:18,marginBottom:16,color:'#1e293b'}}>📜 Mis Tickets</h3>
+              {tickets.length === 0 ? (
+                <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                  <p style={{color:'#64748b',margin:0}}>No tienes tickets creados aún</p>
+                </div>
+              ) : (
+                <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                  {tickets.map(ticket=>(
+                    <div key={ticket.id} style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,padding:16}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:8}}>
+                        <h4 style={{margin:0,fontSize:16,color:'#1e293b'}}>{ticket.titulo}</h4>
+                        <span style={{
+                          padding:'4px 12px',
+                          borderRadius:12,
+                          fontSize:12,
+                          fontWeight:600,
+                          background: ticket.estado === 'abierto' ? '#fef3c7' : ticket.estado === 'en_proceso' ? '#dbeafe' : '#d1fae5',
+                          color: ticket.estado === 'abierto' ? '#92400e' : ticket.estado === 'en_proceso' ? '#1e40af' : '#065f46'
+                        }}>
+                          {ticket.estado === 'abierto' ? '🔵 Abierto' : ticket.estado === 'en_proceso' ? '🟡 En Proceso' : '✅ Cerrado'}
+                        </span>
+                      </div>
+                      <p style={{margin:'8px 0',color:'#475569',fontSize:14}}>{ticket.descripcion}</p>
+                      <div style={{display:'flex',gap:16,fontSize:13,color:'#64748b',marginTop:12}}>
+                        <span>🏷️ Prioridad: <strong style={{textTransform:'capitalize'}}>{ticket.prioridad}</strong></span>
+                        <span>📅 {new Date(ticket.created_at).toLocaleDateString('es-ES')}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

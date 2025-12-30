@@ -8,16 +8,42 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query, pool } = require('./db');
+const multer = require('multer');
+const fs = require('fs');
+
+// Configurar multer para guardar archivos de responsiva
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, 'uploads', 'responsivas');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'responsiva-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage: storage });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || '';
+  console.log('[verifyToken] Authorization header:', auth ? 'presente' : 'ausente');
   const parts = auth.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') return res.status(401).json({ error: 'missing token' });
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    console.log('[verifyToken] Error: formato de token inválido');
+    return res.status(401).json({ error: 'missing token' });
+  }
   const token = parts[1];
   jwt.verify(token, JWT_SECRET, (err, payload) => {
-    if (err) return res.status(401).json({ error: 'invalid token' });
+    if (err) {
+      console.log('[verifyToken] Error al verificar token:', err.message);
+      return res.status(401).json({ error: 'invalid token' });
+    }
+    console.log('[verifyToken] Token válido para usuario:', payload.email);
     req.user = payload;
     next();
   });
@@ -104,7 +130,7 @@ app.post('/auth/login-client', (req, res) => {
       const match = bcrypt.compareSync(password, user.password);
       if (!match) return res.status(401).json({ error: 'invalid credentials' });
 
-      const token = jwt.sign({ id: user.id, email: user.email, rol: 'cliente' }, JWT_SECRET, { expiresIn: '8h' });
+      const token = jwt.sign({ id: user.id, email: user.email, rol: 'cliente', empresa_id: user.empresa_id }, JWT_SECRET, { expiresIn: '8h' });
       return res.json({ token, user: { id: user.id, email: user.email, rol: 'cliente', nombre_usuario: user.nombre_usuario, empresa_id: user.empresa_id } });
     } catch (err) {
       console.error('client auth error', err);
@@ -113,27 +139,84 @@ app.post('/auth/login-client', (req, res) => {
   })();
 });
 
-// Equipment census request (clients only)
-app.post('/equipment-requests', verifyToken, async (req, res) => {
+// Equipment census request (clients only) - con archivo de responsiva para laptops
+app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
-    const { marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo } = req.body || {};
+    const { marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, empleado_id } = req.body || {};
     if (!marca || !modelo || !no_serie) return res.status(400).json({ error: 'missing required fields' });
 
     // Extraer empresa_id del token (está en req.user)
     const empresa_id = req.user.empresa_id;
 
-    // Eliminar solicitudes anteriores del mismo cliente antes de insertar la nueva
-    await query('DELETE FROM equipment_requests WHERE cliente_id = $1', [req.user.id]);
+    console.log('===== DEBUG INICIO =====');
+    console.log('Tipo de equipo:', tipo_equipo);
+    console.log('Archivo recibido:', req.file ? req.file.filename : 'NO HAY ARCHIVO');
+    console.log('Empresa ID:', empresa_id);
 
+    // Generar ID único para el equipo
+    const id_equipo = `EQ-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // Manejo del archivo de responsiva
+    if (tipo_equipo && tipo_equipo.toLowerCase().includes('laptop')) {
+      console.log('Es laptop, procesando responsiva...');
+      
+      if (!req.file) {
+        console.log('ERROR: No se recibió archivo para laptop');
+        return res.status(400).json({ error: 'Se requiere archivo de responsiva para laptops' });
+      }
+      
+      // Guardar o actualizar el archivo de responsiva en la tabla documentos
+      const archivo_responsiva = req.file.filename;
+      console.log('Nombre de archivo a guardar:', archivo_responsiva);
+      
+      // Verificar si ya existe un documento para esta empresa
+      const docExistente = await query('SELECT id FROM documentos WHERE empresa_id = $1', [empresa_id]);
+      console.log('Documento existente:', docExistente.rows.length > 0 ? 'SÍ' : 'NO');
+      
+      if (docExistente.rows.length > 0) {
+        // Actualizar el documento existente
+        console.log('Actualizando documento existente...');
+        const updateResult = await query(
+          'UPDATE documentos SET archivo_responsiva = $1 WHERE empresa_id = $2 RETURNING *',
+          [archivo_responsiva, empresa_id]
+        );
+        console.log('Documento actualizado:', updateResult.rows[0]);
+      } else {
+        // Crear nuevo documento
+        console.log('Creando nuevo documento...');
+        const insertResult = await query(
+          'INSERT INTO documentos (empresa_id, archivo_responsiva) VALUES ($1, $2) RETURNING *',
+          [empresa_id, archivo_responsiva]
+        );
+        console.log('Documento creado:', insertResult.rows[0]);
+      }
+      
+      console.log('Archivo de responsiva guardado en documentos:', archivo_responsiva);
+    } else {
+      console.log('No es laptop, no se requiere responsiva');
+    }
+
+    // Guardar directamente en la tabla equipos (con empleado_id)
     const insert = await query(
-      'INSERT INTO equipment_requests (cliente_id, empresa_id, marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *',
-      [req.user.id, empresa_id, marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, 'pendiente']
+      'INSERT INTO equipos (id_equipo, empresa_id, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
+      [id_equipo, empresa_id, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '']
     );
-    return res.status(201).json({ request: insert.rows[0] });
+
+    console.log('Equipo guardado en tabla equipos:', insert.rows[0]);
+
+    // También guardar en equipment_requests para historial
+    await query(
+      'INSERT INTO equipment_requests (cliente_id, empresa_id, marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
+      [req.user.id, empresa_id, marca, modelo, no_serie, codigo_registro || '', memoria_ram || '', disco_duro || '', serie_disco_duro || '', sistema_operativo || '', procesador || '', nombre_usuario_equipo || '', tipo_equipo || '', nombre_equipo || '', 'registrado']
+    );
+
+    console.log('===== DEBUG FIN =====');
+    return res.status(201).json({ equipo: insert.rows[0], message: 'Equipo registrado exitosamente' });
   } catch (err) {
-    console.error('equipment request error', err);
-    return res.status(500).json({ error: 'server error' });
+    console.error('equipment registration error', err);
+    console.error('Error details:', err.message);
+    return res.status(500).json({ error: 'server error', details: err.message });
   }
 });
 
@@ -145,6 +228,248 @@ app.get('/equipment-requests', verifyToken, async (req, res) => {
     return res.json({ requests: result.rows });
   } catch (err) {
     console.error('list equipment requests error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Descargar documento de responsiva de equipo (plantilla Word)
+app.get('/download/responsiva-template', verifyToken, (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    
+    const filePath = path.join(__dirname, 'plantillas', 'responsiva_laptop.docx');
+    
+    // Verificar si el archivo existe
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Archivo de plantilla no encontrado. Por favor contacta al administrador.' });
+    }
+    
+    // Enviar el archivo Word
+    res.download(filePath, 'responsiva_laptop.docx', (err) => {
+      if (err) {
+        console.error('Error al descargar responsiva:', err);
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'Error al descargar el archivo' });
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Error al generar responsiva:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ==================== EMPLEADOS ====================
+
+// Crear empleado (cliente)
+app.post('/empleados', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const { id_empleado, nombre_empleado } = req.body;
+    
+    console.log('===== CREAR EMPLEADO DEBUG =====');
+    console.log('Usuario:', req.user);
+    console.log('Empresa ID:', req.user.empresa_id);
+    console.log('Body:', req.body);
+    
+    if (!id_empleado || !nombre_empleado) {
+      return res.status(400).json({ error: 'Se requiere id_empleado y nombre_empleado' });
+    }
+
+    const empresa_id = req.user.empresa_id;
+
+    if (!empresa_id) {
+      console.log('ERROR: empresa_id no está definido en el token');
+      return res.status(400).json({ error: 'No se encontró empresa_id en el token del usuario' });
+    }
+
+    console.log('Verificando si empleado existe...');
+    // Verificar si el id_empleado ya existe en la empresa
+    const existente = await query(
+      'SELECT id FROM empleados WHERE id_empleado = $1 AND empresa_id = $2',
+      [id_empleado, empresa_id]
+    );
+
+    console.log('Empleados existentes:', existente.rows.length);
+
+    if (existente.rows.length > 0) {
+      return res.status(400).json({ error: 'El ID de empleado ya existe en esta empresa' });
+    }
+
+    console.log('Insertando empleado...');
+    const result = await query(
+      'INSERT INTO empleados (id_empleado, nombre_empleado, empresa_id) VALUES ($1, $2, $3) RETURNING *',
+      [id_empleado, nombre_empleado, empresa_id]
+    );
+
+    console.log('Empleado insertado:', result.rows[0]);
+    console.log('===== FIN DEBUG =====');
+
+    return res.status(201).json({ empleado: result.rows[0], message: 'Empleado registrado exitosamente' });
+  } catch (err) {
+    console.error('Error al crear empleado:', err);
+    console.error('Error message:', err.message);
+    console.error('Error stack:', err.stack);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Listar empleados de la empresa del cliente
+app.get('/empleados', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const empresa_id = req.user.empresa_id;
+
+    const result = await query(
+      'SELECT * FROM empleados WHERE empresa_id = $1 ORDER BY nombre_empleado ASC',
+      [empresa_id]
+    );
+
+    return res.json({ empleados: result.rows });
+  } catch (err) {
+    console.error('Error al obtener empleados:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Actualizar empleado
+app.put('/empleados/:id', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const { id_empleado, nombre_empleado } = req.body;
+    const empresa_id = req.user.empresa_id;
+
+    // Verificar que el empleado pertenece a la empresa del cliente
+    const empleado = await query('SELECT id FROM empleados WHERE id = $1 AND empresa_id = $2', [id, empresa_id]);
+    
+    if (empleado.rows.length === 0) {
+      return res.status(404).json({ error: 'Empleado no encontrado' });
+    }
+
+    const result = await query(
+      'UPDATE empleados SET id_empleado = $1, nombre_empleado = $2 WHERE id = $3 AND empresa_id = $4 RETURNING *',
+      [id_empleado, nombre_empleado, id, empresa_id]
+    );
+
+    return res.json({ empleado: result.rows[0], message: 'Empleado actualizado exitosamente' });
+  } catch (err) {
+    console.error('Error al actualizar empleado:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Eliminar empleado
+app.delete('/empleados/:id', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const empresa_id = req.user.empresa_id;
+
+    // Verificar que el empleado pertenece a la empresa del cliente
+    const empleado = await query('SELECT id FROM empleados WHERE id = $1 AND empresa_id = $2', [id, empresa_id]);
+    
+    if (empleado.rows.length === 0) {
+      return res.status(404).json({ error: 'Empleado no encontrado' });
+    }
+
+    await query('DELETE FROM empleados WHERE id = $1 AND empresa_id = $2', [id, empresa_id]);
+
+    return res.json({ message: 'Empleado eliminado exitosamente' });
+  } catch (err) {
+    console.error('Error al eliminar empleado:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ==================== PERFIL ====================
+
+// Obtener perfil del cliente con datos de su empresa
+app.get('/perfil', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    
+    const usuario_id = req.user.id;
+    
+    // Obtener datos del usuario y su empresa
+    const result = await query(`
+      SELECT 
+        ue.id, 
+        ue.id_usuario, 
+        ue.nombre_usuario, 
+        ue.apellido_usuario, 
+        ue.email, 
+        ue.nombre_profile,
+        ue.empresa_id,
+        e.id_empresa,
+        e.nombre_empresa,
+        e.rfc,
+        e.fecha_pago,
+        e.dias_asignados
+      FROM usuarios_empresas ue
+      LEFT JOIN empresas e ON ue.empresa_id = e.id
+      WHERE ue.id = $1
+    `, [usuario_id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const perfilData = result.rows[0];
+
+    // Obtener conteo de equipos de la empresa (directamente desde tabla equipos)
+    let totalEquipos = 0;
+    if (perfilData.empresa_id) {
+      const equiposResult = await query(
+        'SELECT COUNT(*) as total FROM equipos WHERE empresa_id = $1',
+        [perfilData.empresa_id]
+      );
+      totalEquipos = parseInt(equiposResult.rows[0].total) || 0;
+    }
+
+    perfilData.total_equipos = totalEquipos;
+
+    return res.json({ perfil: perfilData });
+  } catch (err) {
+    console.error('Error al obtener perfil:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Obtener todos los equipos de la empresa del cliente
+app.get('/equipos', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    
+    const empresa_id = req.user.empresa_id;
+    
+    const result = await query(`
+      SELECT 
+        eq.id,
+        eq.id_equipo,
+        eq.tipo_equipo,
+        eq.marca,
+        eq.modelo,
+        eq.numero_serie,
+        eq.sistema_operativo,
+        eq.procesador,
+        eq.ram,
+        eq.disco_duro,
+        eq.codigo_registro,
+        emp.id_empleado,
+        emp.nombre_empleado,
+        e.nombre_empresa
+      FROM equipos eq
+      LEFT JOIN empleados emp ON eq.empleado_id = emp.id
+      LEFT JOIN empresas e ON eq.empresa_id = e.id
+      WHERE eq.empresa_id = $1
+      ORDER BY eq.id DESC
+    `, [empresa_id]);
+
+    return res.json({ equipos: result.rows });
+  } catch (err) {
+    console.error('Error al obtener equipos:', err);
     return res.status(500).json({ error: 'server error' });
   }
 });
@@ -179,29 +504,14 @@ app.get('/download/census-tool', verifyToken, (req, res) => {
   }
 });
 
-// Download census tool with embedded token
-app.get('/download/census-tool-auto', verifyToken, (req, res) => {
-  console.log('[census-tool-auto] Request received from user:', req.user.email);
+// Download census tool without authentication - generates txt file with hardware info
+app.get('/download/census-tool-auto', (req, res) => {
+  console.log('[census-tool-auto] Request received');
   try {
-    if (!req.user || req.user.rol !== 'cliente') {
-      console.log('[census-tool-auto] Forbidden: user role is', req.user?.rol);
-      return res.status(403).json({ error: 'forbidden' });
-    }
-    const fs = require('fs');
-    const path = require('path');
-    const filePath = path.join(__dirname, 'census_tool.py');
-    
-    console.log('[census-tool-auto] Reading file:', filePath);
-    
-    // Leer el archivo y reemplazar el token
-    const pythonCode = fs.readFileSync(filePath, 'utf8');
-    const token = req.headers['authorization'].split(' ')[1];
-    const pythonCodeWithToken = pythonCode.replace('__TOKEN_PLACEHOLDER__', token);
-    
-    // Crear archivo .sh con el código Python embebido
+    // Crear script .sh que detecta el hardware y genera archivo txt
     const shScript = `#!/bin/bash
 # Script de Censo de Equipos - CAAST Sistemas
-# Se ejecuta automáticamente al abrir
+# Detecta información del hardware y genera archivo txt
 
 echo "===================================================================="
 echo "  Herramienta de Censo de Equipos - CAAST Sistemas"
@@ -219,41 +529,265 @@ fi
 
 echo "Python 3 detectado: $(python3 --version)"
 echo ""
-
-# Verificar módulo requests
-echo "Verificando módulo 'requests'..."
-python3 -c "import requests" 2>/dev/null
-if [ $? -ne 0 ]; then
-    echo "Instalando módulo 'requests'..."
-    pip3 install requests --user || {
-        echo "ERROR: No se pudo instalar el módulo 'requests'."
-        read -p "Presiona Enter para salir..."
-        exit 1
-    }
-fi
-
-echo "✓ Módulo 'requests' disponible"
+echo "Detectando información del equipo..."
 echo ""
 
 # Ejecutar el código Python embebido
 python3 - <<'PYTHON_CODE_END'
-${pythonCodeWithToken}
+import platform
+import subprocess
+import os
+import json
+from datetime import datetime
+
+def get_windows_info():
+    """Obtiene información de hardware en Windows usando WMIC"""
+    info = {}
+    try:
+        info['sistema_operativo'] = platform.platform()
+        cpu = subprocess.check_output("wmic cpu get name", shell=True).decode().strip().split('\\n')[1].strip()
+        info['procesador'] = cpu
+        ram = subprocess.check_output("wmic computersystem get totalphysicalmemory", shell=True).decode().strip().split('\\n')[1].strip()
+        ram_gb = round(int(ram) / (1024**3))
+        info['memoria_ram'] = f"{ram_gb}GB"
+        disk = subprocess.check_output("wmic diskdrive get size,model", shell=True).decode().strip().split('\\n')[1].strip()
+        info['disco_duro'] = disk
+        disk_serial = subprocess.check_output("wmic diskdrive get serialnumber", shell=True).decode().strip().split('\\n')[1].strip()
+        info['serie_disco_duro'] = disk_serial
+        serial = subprocess.check_output("wmic bios get serialnumber", shell=True).decode().strip().split('\\n')[1].strip()
+        info['no_serie'] = serial
+        manufacturer = subprocess.check_output("wmic computersystem get manufacturer", shell=True).decode().strip().split('\\n')[1].strip()
+        model = subprocess.check_output("wmic computersystem get model", shell=True).decode().strip().split('\\n')[1].strip()
+        info['marca'] = manufacturer
+        info['modelo'] = model
+        info['nombre_equipo'] = platform.node()
+        info['nombre_usuario_equipo'] = os.getlogin()
+        chassis = subprocess.check_output("wmic systemenclosure get chassistypes", shell=True).decode().strip().split('\\n')[1].strip()
+        tipo = "Desktop" if chassis in ["3", "4", "5", "6", "7"] else "Laptop"
+        info['tipo_equipo'] = tipo
+        info['codigo_registro'] = serial
+    except Exception as e:
+        print(f"Error obteniendo info de Windows: {e}")
+    return info
+
+def get_linux_info():
+    """Obtiene información de hardware en Linux"""
+    info = {}
+    try:
+        info['sistema_operativo'] = f"{platform.system()} {platform.release()}"
+        with open('/proc/cpuinfo', 'r') as f:
+            for line in f:
+                if 'model name' in line:
+                    info['procesador'] = line.split(':')[1].strip()
+                    break
+        with open('/proc/meminfo', 'r') as f:
+            mem = f.readline().split()[1]
+            ram_gb = round(int(mem) / (1024**2))
+            info['memoria_ram'] = f"{ram_gb}GB"
+        try:
+            disk = subprocess.check_output("lsblk -d -o SIZE,MODEL | grep -v loop | tail -1", shell=True).decode().strip()
+            info['disco_duro'] = disk
+        except:
+            info['disco_duro'] = "N/A"
+        try:
+            disk_serial = subprocess.check_output("lsblk -d -o SERIAL | tail -1", shell=True).decode().strip()
+            info['serie_disco_duro'] = disk_serial
+        except:
+            info['serie_disco_duro'] = "N/A"
+        try:
+            serial = subprocess.check_output("sudo dmidecode -s system-serial-number 2>/dev/null || echo N/A", shell=True).decode().strip()
+            info['no_serie'] = serial
+        except:
+            info['no_serie'] = "N/A"
+        try:
+            manufacturer = subprocess.check_output("sudo dmidecode -s system-manufacturer 2>/dev/null || echo N/A", shell=True).decode().strip()
+            model = subprocess.check_output("sudo dmidecode -s system-product-name 2>/dev/null || echo N/A", shell=True).decode().strip()
+            info['marca'] = manufacturer
+            info['modelo'] = model
+        except:
+            info['marca'] = "N/A"
+            info['modelo'] = "N/A"
+        info['nombre_equipo'] = platform.node()
+        info['nombre_usuario_equipo'] = os.getlogin()
+        try:
+            chassis = subprocess.check_output("sudo dmidecode -s chassis-type 2>/dev/null || echo Desktop", shell=True).decode().strip()
+            tipo = "Laptop" if "Laptop" in chassis or "Notebook" in chassis else "Desktop"
+            info['tipo_equipo'] = tipo
+        except:
+            info['tipo_equipo'] = "Desktop"
+        info['codigo_registro'] = info['no_serie']
+    except Exception as e:
+        print(f"Error obteniendo info de Linux: {e}")
+    return info
+
+def main():
+    system = platform.system()
+    if system == "Windows":
+        info = get_windows_info()
+    elif system == "Linux":
+        info = get_linux_info()
+    else:
+        print(f"Sistema operativo {system} no soportado")
+        return
+    
+    # Mostrar información en pantalla
+    print("="*70)
+    print("  INFORMACIÓN DEL EQUIPO DETECTADA")
+    print("="*70)
+    print()
+    for key, value in info.items():
+        label = key.replace('_', ' ').title()
+        print(f"  {label:30s}: {value}")
+    print()
+    print("="*70)
+    print()
+    
+    # Generar archivo txt con la información
+    filename = f"censo_equipo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write("CENSO DE EQUIPO - CAAST SISTEMAS\\n")
+        f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n")
+        f.write("="*70 + "\\n\\n")
+        for key, value in info.items():
+            f.write(f"{key}={value}\\n")
+    
+    print(f"✓ Archivo generado: {filename}")
+    print(f"\\nSube este archivo al portal web para completar el censo.")
+    print()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\\n\\nProceso cancelado por el usuario")
+    except Exception as e:
+        print(f"\\nError: {e}")
+    finally:
+        input("\\nPresiona Enter para cerrar...")
 PYTHON_CODE_END
 
-# Mantener la ventana abierta al finalizar
-read -p "Presiona Enter para cerrar..."
 `;
     
-    console.log('[census-tool-auto] Generated .sh file, size:', shScript.length, 'bytes');
-    
-    // Enviar el archivo .sh
+    console.log('[census-tool-auto] Sending .sh file');
     res.setHeader('Content-Type', 'application/x-sh');
     res.setHeader('Content-Disposition', 'attachment; filename="censo_equipos.sh"');
     res.send(shScript);
     
-    console.log('[census-tool-auto] File sent successfully');
   } catch (err) {
     console.error('[census-tool-auto] Error:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Download census tool for Windows (.bat) - generates txt file with hardware info
+app.get('/download/census-tool-windows', (req, res) => {
+  console.log('[census-tool-windows] Request received');
+  try {
+    const batScript = `@echo off
+chcp 65001 >nul
+cls
+echo ====================================================================
+echo   Herramienta de Censo de Equipos - CAAST Sistemas
+echo ====================================================================
+echo.
+echo Verificando Python...
+
+where python >nul 2>nul
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Python no está instalado.
+    echo Por favor instala Python desde https://www.python.org/
+    pause
+    exit /b 1
+)
+
+python --version
+echo.
+echo Detectando información del equipo...
+echo.
+
+python -c "
+import platform
+import subprocess
+import os
+from datetime import datetime
+
+def get_windows_info():
+    info = {}
+    try:
+        info['sistema_operativo'] = platform.platform()
+        cpu = subprocess.check_output('wmic cpu get name', shell=True).decode().strip().split('\\n')[1].strip()
+        info['procesador'] = cpu
+        ram = subprocess.check_output('wmic computersystem get totalphysicalmemory', shell=True).decode().strip().split('\\n')[1].strip()
+        ram_gb = round(int(ram) / (1024**3))
+        info['memoria_ram'] = f'{ram_gb}GB'
+        disk = subprocess.check_output('wmic diskdrive get size,model', shell=True).decode().strip().split('\\n')[1].strip()
+        info['disco_duro'] = disk
+        disk_serial = subprocess.check_output('wmic diskdrive get serialnumber', shell=True).decode().strip().split('\\n')[1].strip()
+        info['serie_disco_duro'] = disk_serial
+        serial = subprocess.check_output('wmic bios get serialnumber', shell=True).decode().strip().split('\\n')[1].strip()
+        info['no_serie'] = serial
+        manufacturer = subprocess.check_output('wmic computersystem get manufacturer', shell=True).decode().strip().split('\\n')[1].strip()
+        model = subprocess.check_output('wmic computersystem get model', shell=True).decode().strip().split('\\n')[1].strip()
+        info['marca'] = manufacturer
+        info['modelo'] = model
+        info['nombre_equipo'] = platform.node()
+        info['nombre_usuario_equipo'] = os.getlogin()
+        chassis = subprocess.check_output('wmic systemenclosure get chassistypes', shell=True).decode().strip().split('\\n')[1].strip()
+        tipo = 'Desktop' if chassis in ['3', '4', '5', '6', '7'] else 'Laptop'
+        info['tipo_equipo'] = tipo
+    except Exception as e:
+        print(f'Error obteniendo info: {e}')
+    return info
+
+def main():
+    info = get_windows_info()
+    
+    print('='*70)
+    print('  INFORMACIÓN DEL EQUIPO DETECTADA')
+    print('='*70)
+    print()
+    for key, value in info.items():
+        label = key.replace('_', ' ').title()
+        print(f'  {label:30s}: {value}')
+    print()
+    print('='*70)
+    print()
+    
+    filename = f'censo_equipo_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.txt'
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write('CENSO DE EQUIPO - CAAST SISTEMAS\\n')
+        f.write(f'Fecha: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}\\n')
+        f.write('='*70 + '\\n\\n')
+        for key, value in info.items():
+            f.write(f'{key}={value}\\n')
+    
+    print(f'✓ Archivo generado: {filename}')
+    print(f'✓ Ubicación: {os.path.abspath(filename)}')
+    print()
+    print('Sube este archivo al portal para completar el censo.')
+    print()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print('\\n\\nProceso cancelado')
+    except Exception as e:
+        print(f'\\nError: {e}')
+    finally:
+        input('\\nPresiona Enter para cerrar...')
+"
+
+pause
+`;
+    
+    console.log('[census-tool-windows] Sending .bat file');
+    res.setHeader('Content-Type', 'application/x-msdos-program');
+    res.setHeader('Content-Disposition', 'attachment; filename="censo_equipos.bat"');
+    res.send(batScript);
+    
+  } catch (err) {
+    console.error('[census-tool-windows] Error:', err);
     return res.status(500).json({ error: 'server error' });
   }
 });
@@ -293,6 +827,65 @@ app.get('/download/census-tool-linux', verifyToken, (req, res) => {
     return res.status(500).json({ error: 'server error' });
   }
 });
+// ==================== TICKETS ENDPOINTS ====================
 
+// Create ticket (cliente only)
+app.post('/tickets', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const { asunto, descripcion, prioridad } = req.body || {};
+    if (!asunto || !descripcion) return res.status(400).json({ error: 'missing required fields' });
+
+    const insert = await query(
+      'INSERT INTO tickets (cliente_id, empresa_id, asunto, descripcion, prioridad, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.id, req.user.empresa_id, asunto, descripcion, prioridad || 'media', 'abierto']
+    );
+    return res.status(201).json({ ticket: insert.rows[0] });
+  } catch (err) {
+    console.error('create ticket error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Get my tickets (cliente only)
+app.get('/tickets/mine', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const result = await query('SELECT * FROM tickets WHERE cliente_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    return res.json({ tickets: result.rows });
+  } catch (err) {
+    console.error('get my tickets error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// List all tickets (admin only)
+app.get('/tickets', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const result = await query('SELECT t.*, ue.nombre_usuario as cliente_nombre, ue.email as cliente_email, e.nombre_empresa FROM tickets t LEFT JOIN usuarios_empresas ue ON t.cliente_id = ue.id LEFT JOIN empresas e ON t.empresa_id = e.id ORDER BY t.created_at DESC');
+    return res.json({ tickets: result.rows });
+  } catch (err) {
+    console.error('list tickets error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Update ticket status (admin only)
+app.patch('/tickets/:id', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    const { id } = req.params;
+    const { status } = req.body || {};
+    if (!status) return res.status(400).json({ error: 'missing status' });
+
+    const update = await query('UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [status, id]);
+    if (update.rows.length === 0) return res.status(404).json({ error: 'ticket not found' });
+    return res.json({ ticket: update.rows[0] });
+  } catch (err) {
+    console.error('update ticket error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Backend listening on http://localhost:${port}`));
