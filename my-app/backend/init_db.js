@@ -29,8 +29,12 @@ async function run() {
       rfc VARCHAR(50),
       fecha_pago DATE,
       dias_asignados INTEGER,
-      id_documento INTEGER
+      id_documento INTEGER,
+      id_equipo INTEGER
     )`);
+
+    // Agregar columna id_equipo a empresas si no existe
+    await query(`ALTER TABLE empresas ADD COLUMN IF NOT EXISTS id_equipo INTEGER`).catch(() => {});
 
     // Empleados
     await query(`CREATE TABLE IF NOT EXISTS empleados (
@@ -58,9 +62,8 @@ async function run() {
     // Equipos
     await query(`CREATE TABLE IF NOT EXISTS equipos (
       id SERIAL PRIMARY KEY,
-      id_equipo VARCHAR(150) UNIQUE,
+      id_equipo INTEGER,
       empleado_id INTEGER REFERENCES empleados(id) ON DELETE SET NULL,
-      empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL,
       tipo_equipo VARCHAR(120),
       marca VARCHAR(120),
       modelo VARCHAR(120),
@@ -72,8 +75,9 @@ async function run() {
       codigo_registro VARCHAR(150)
     )`);
 
-    // Agregar columna empresa_id a equipos si no existe
-    await query(`ALTER TABLE equipos ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL`).catch(() => {});
+    // Eliminar constraint UNIQUE de id_equipo si existe y cambiar tipo a INTEGER
+    await query(`ALTER TABLE equipos DROP CONSTRAINT IF EXISTS equipos_id_equipo_key`).catch(() => {});
+    await query(`ALTER TABLE equipos ALTER COLUMN id_equipo TYPE INTEGER USING CAST(id_equipo AS INTEGER)`).catch(() => {});
 
     // Codigo Registro
     await query(`CREATE TABLE IF NOT EXISTS codigo_registro (
@@ -132,6 +136,9 @@ async function run() {
       nombre_profile VARCHAR(200),
       empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL
     )`);
+
+    // Agregar columna empresa_id a usuarios_empresas si no existe
+    await query(`ALTER TABLE usuarios_empresas ADD COLUMN IF NOT EXISTS empresa_id INTEGER REFERENCES empresas(id) ON DELETE SET NULL`).catch(() => {});
 
     // Equipment census requests from clients
     await query(`CREATE TABLE IF NOT EXISTS equipment_requests (

@@ -313,6 +313,7 @@ export default function ClientDashboard(){
       formData.append('tipo_equipo', form.tipo_equipo)
       formData.append('nombre_equipo', form.nombre_equipo)
       formData.append('empresa_id', user.empresa_id)
+      formData.append('empleado_id', form.empleado_id) // Agregar ID del empleado
       
       // Agregar archivo de responsiva si existe
       if(archivoResponsiva){
@@ -330,7 +331,7 @@ export default function ClientDashboard(){
       setSuccess('✓ Solicitud enviada exitosamente. Puedes censar otro equipo.')
       
       // Limpiar formulario y estados
-      setForm({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'' })
+      setForm({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' })
       setTipoEquipoSeleccionado('')
       setArchivoResponsiva(null)
       setResponsivaDescargada(false)
@@ -644,9 +645,9 @@ export default function ClientDashboard(){
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
-                        <td style={{padding:12,fontSize:14,color:'#64748b',fontSize:12}}>{eq.numero_serie || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.numero_serie || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.sistema_operativo || 'N/A'}</td>
-                        <td style={{padding:12,fontSize:14,color:'#64748b',fontSize:12}}>{eq.procesador || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.procesador || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.ram || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
                           {eq.nombre_empleado ? (
@@ -948,7 +949,7 @@ export default function ClientDashboard(){
                       setForm({
                         ...form, 
                         empleado_id: e.target.value,
-                        nombre_usuario_equipo: selectedEmp ? selectedEmp.nombre_empleado : ''
+                        nombre_usuario_equipo: selectedEmp ? `${selectedEmp.id_empleado}` : ''
                       });
                     }} 
                     style={{width:'100%',padding:8,border:'1px solid #cbd5e1',borderRadius:4}}

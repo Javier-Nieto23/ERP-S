@@ -154,8 +154,9 @@ app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async 
     console.log('Archivo recibido:', req.file ? req.file.filename : 'NO HAY ARCHIVO');
     console.log('Empresa ID:', empresa_id);
 
-    // Generar ID único para el equipo
-    const id_equipo = `EQ-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Usar empresa_id como id_equipo para crear relación 1:N
+    const id_equipo = empresa_id;
+    console.log('ID Equipo asignado (empresa_id):', id_equipo);
 
     // Manejo del archivo de responsiva
     if (tipo_equipo && tipo_equipo.toLowerCase().includes('laptop')) {
@@ -197,13 +198,20 @@ app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async 
       console.log('No es laptop, no se requiere responsiva');
     }
 
-    // Guardar directamente en la tabla equipos (con empleado_id)
+    // Guardar directamente en la tabla equipos (solo con empleado_id, sin empresa_id)
     const insert = await query(
-      'INSERT INTO equipos (id_equipo, empresa_id, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
-      [id_equipo, empresa_id, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '']
+      'INSERT INTO equipos (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+      [id_equipo, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '']
     );
 
     console.log('Equipo guardado en tabla equipos:', insert.rows[0]);
+
+    // Actualizar empresas.id_equipo con el id de la empresa (relación 1:N)
+    await query(
+      'UPDATE empresas SET id_equipo = $1 WHERE id = $2',
+      [empresa_id, empresa_id]
+    );
+    console.log('Empresa actualizada con id_equipo:', empresa_id);
 
     // También guardar en equipment_requests para historial
     await query(
@@ -418,11 +426,14 @@ app.get('/perfil', verifyToken, async (req, res) => {
 
     const perfilData = result.rows[0];
 
-    // Obtener conteo de equipos de la empresa (directamente desde tabla equipos)
+    // Obtener conteo de equipos de la empresa (JOIN directo por id_equipo)
     let totalEquipos = 0;
     if (perfilData.empresa_id) {
       const equiposResult = await query(
-        'SELECT COUNT(*) as total FROM equipos WHERE empresa_id = $1',
+        `SELECT COUNT(*) as total 
+         FROM equipos eq 
+         INNER JOIN empresas e ON eq.id_equipo = e.id_equipo 
+         WHERE e.id = $1`,
         [perfilData.empresa_id]
       );
       totalEquipos = parseInt(equiposResult.rows[0].total) || 0;
@@ -461,9 +472,9 @@ app.get('/equipos', verifyToken, async (req, res) => {
         emp.nombre_empleado,
         e.nombre_empresa
       FROM equipos eq
+      INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
       LEFT JOIN empleados emp ON eq.empleado_id = emp.id
-      LEFT JOIN empresas e ON eq.empresa_id = e.id
-      WHERE eq.empresa_id = $1
+      WHERE e.id = $1
       ORDER BY eq.id DESC
     `, [empresa_id]);
 
@@ -740,6 +751,9 @@ def get_windows_info():
     return info
 
 def main():
+    print('\\nRecopilando información del equipo...')
+    print('Esto puede tomar unos segundos...\\n')
+    
     info = get_windows_info()
     
     print('='*70)
@@ -753,6 +767,8 @@ def main():
     print('='*70)
     print()
     
+    input('Presiona Enter para generar el archivo .txt...')
+    
     filename = f'censo_equipo_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.txt'
     with open(filename, 'w', encoding='utf-8') as f:
         f.write('CENSO DE EQUIPO - CAAST SISTEMAS\\n')
@@ -761,6 +777,7 @@ def main():
         for key, value in info.items():
             f.write(f'{key}={value}\\n')
     
+    print()
     print(f'✓ Archivo generado: {filename}')
     print(f'✓ Ubicación: {os.path.abspath(filename)}')
     print()
