@@ -27,13 +27,11 @@ async function run() {
       id_empresa VARCHAR(100),
       nombre_empresa VARCHAR(250),
       rfc VARCHAR(50),
-      fecha_pago DATE,
-      dias_asignados INTEGER,
       id_documento INTEGER,
       id_equipo INTEGER
     )`);
 
-    // Agregar columna id_equipo a empresas si no existe
+    // Agregar columna id_equipo si no existe
     await query(`ALTER TABLE empresas ADD COLUMN IF NOT EXISTS id_equipo INTEGER`).catch(() => {});
 
     // Empleados
@@ -78,6 +76,9 @@ async function run() {
     // Eliminar constraint UNIQUE de id_equipo si existe y cambiar tipo a INTEGER
     await query(`ALTER TABLE equipos DROP CONSTRAINT IF EXISTS equipos_id_equipo_key`).catch(() => {});
     await query(`ALTER TABLE equipos ALTER COLUMN id_equipo TYPE INTEGER USING CAST(id_equipo AS INTEGER)`).catch(() => {});
+    
+    // Agregar columna status a equipos si no existe
+    await query(`ALTER TABLE equipos ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pendiente'`).catch(() => {});
 
     // Codigo Registro
     await query(`CREATE TABLE IF NOT EXISTS codigo_registro (
@@ -194,6 +195,23 @@ async function run() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
     console.log('Tickets table created or already exists.');
+
+    // Tabla de pagos/transacciones
+    await query(`CREATE TABLE IF NOT EXISTS pagos (
+      id SERIAL PRIMARY KEY,
+      empresa_id_pago INTEGER REFERENCES empresas(id) ON DELETE CASCADE,
+      usuario_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE SET NULL,
+      monto DECIMAL(10,2) NOT NULL,
+      moneda VARCHAR(10) DEFAULT 'MXN',
+      metodo_pago VARCHAR(50),
+      referencia_pago VARCHAR(255),
+      estado_pago VARCHAR(50) DEFAULT 'pendiente',
+      dias_agregados INTEGER NOT NULL,
+      fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      fecha_expiracion TIMESTAMP,
+      datos_pago JSONB
+    )`);
+    console.log('Pagos table created or already exists.');
 
     console.log('DB initialization finished.');
   } catch (err) {

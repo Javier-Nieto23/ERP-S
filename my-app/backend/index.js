@@ -2,14 +2,78 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const app = express();
-app.use(express.json());
-app.use(cors());
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query, pool } = require('./db');
 const multer = require('multer');
 const fs = require('fs');
+const { PLANES } = require('./payment-config');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// IMPORTANTE: El webhook de Stripe debe estar ANTES de express.json()
+// porque necesita el body raw
+app.use(cors());
+
+// Webhook de Stripe (debe ir antes de express.json())
+app.post('/pagos/webhook', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  // Manejar el evento de pago completado
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    const { empresa_id, usuario_id, plan, dias } = session.metadata;
+
+    const planSeleccionado = PLANES[plan];
+
+    try {
+      // Calcular fecha de expiración
+      const ahora = new Date();
+      const fecha_expiracion = new Date(ahora);
+      fecha_expiracion.setDate(fecha_expiracion.getDate() + parseInt(dias));
+
+      // Registrar pago en tabla pagos
+      await query(
+        `INSERT INTO pagos 
+         (empresa_id_pago, usuario_id, monto, moneda, metodo_pago, referencia_pago, estado_pago, dias_agregados, fecha_pago, fecha_expiracion, datos_pago) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          parseInt(empresa_id),
+          parseInt(usuario_id),
+          planSeleccionado.precio,
+          'MXN',
+          'stripe',
+          session.payment_intent,
+          'completado',
+          parseInt(dias),
+          ahora,
+          fecha_expiracion,
+          JSON.stringify({ plan: plan, nombre_plan: planSeleccionado.nombre, session_id: session.id })
+        ]
+      );
+
+      console.log('✅ Pago procesado exitosamente para empresa:', empresa_id);
+
+    } catch (err) {
+      console.error('Error procesando pago webhook:', err);
+    }
+  }
+
+  res.status(200).json({ received: true });
+});
+
+// Ahora sí, aplicar express.json() para las demás rutas
+app.use(express.json());
 
 // Configurar multer para guardar archivos de responsiva
 const storage = multer.diskStorage({
@@ -199,12 +263,13 @@ app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async 
     }
 
     // Guardar directamente en la tabla equipos (solo con empleado_id, sin empresa_id)
+    // El status inicial será 'pendiente' cuando se realiza un censo
     const insert = await query(
-      'INSERT INTO equipos (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-      [id_equipo, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '']
+      'INSERT INTO equipos (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
+      [id_equipo, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '', 'pendiente']
     );
 
-    console.log('Equipo guardado en tabla equipos:', insert.rows[0]);
+    console.log('Equipo guardado en tabla equipos con status pendiente:', insert.rows[0]);
 
     // Actualizar empresas.id_equipo con el id de la empresa (relación 1:N)
     await query(
@@ -216,7 +281,7 @@ app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async 
     // También guardar en equipment_requests para historial
     await query(
       'INSERT INTO equipment_requests (cliente_id, empresa_id, marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)',
-      [req.user.id, empresa_id, marca, modelo, no_serie, codigo_registro || '', memoria_ram || '', disco_duro || '', serie_disco_duro || '', sistema_operativo || '', procesador || '', nombre_usuario_equipo || '', tipo_equipo || '', nombre_equipo || '', 'registrado']
+      [req.user.id, empresa_id, marca, modelo, no_serie, codigo_registro || '', memoria_ram || '', disco_duro || '', serie_disco_duro || '', sistema_operativo || '', procesador || '', nombre_usuario_equipo || '', tipo_equipo || '', nombre_equipo || '', 'pendiente']
     );
 
     console.log('===== DEBUG FIN =====');
@@ -412,9 +477,7 @@ app.get('/perfil', verifyToken, async (req, res) => {
         ue.empresa_id,
         e.id_empresa,
         e.nombre_empresa,
-        e.rfc,
-        e.fecha_pago,
-        e.dias_asignados
+        e.rfc
       FROM usuarios_empresas ue
       LEFT JOIN empresas e ON ue.empresa_id = e.id
       WHERE ue.id = $1
@@ -904,5 +967,194 @@ app.patch('/tickets/:id', verifyToken, async (req, res) => {
     return res.status(500).json({ error: 'server error' });
   }
 });
+
+// ============= SISTEMA DE PAGOS Y SUSCRIPCIONES =============
+
+// Obtener planes disponibles
+app.get('/planes', (req, res) => {
+  return res.json({ planes: PLANES });
+});
+
+// Obtener clave pública de Stripe
+app.get('/stripe/config', (req, res) => {
+  return res.json({ 
+    publishableKey: process.env.STRIPE_PUBLISHABLE_KEY 
+  });
+});
+
+// Obtener estado de suscripción de la empresa
+app.get('/suscripcion/estado', verifyToken, async (req, res) => {
+  try {
+    const empresa_id = req.user.empresa_id;
+    if (!empresa_id) return res.status(400).json({ error: 'no empresa_id' });
+
+    // Obtener el pago activo más reciente (mayor fecha_expiracion)
+    const result = await query(
+      `SELECT fecha_pago, fecha_expiracion, dias_agregados, estado_pago 
+       FROM pagos 
+       WHERE empresa_id_pago = $1 AND estado_pago = 'completado'
+       ORDER BY fecha_expiracion DESC 
+       LIMIT 1`,
+      [empresa_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        suscripcion: {
+          estado: 'inactiva',
+          fecha_inicio: null,
+          fecha_expiracion: null,
+          dias_restantes: 0
+        }
+      });
+    }
+
+    const pago = result.rows[0];
+    const ahora = new Date();
+    const fecha_expiracion = new Date(pago.fecha_expiracion);
+    const diferencia = fecha_expiracion - ahora;
+    const dias_restantes = Math.max(0, Math.ceil(diferencia / (1000 * 60 * 60 * 24)));
+    const estado = dias_restantes > 0 ? 'activa' : 'expirada';
+
+    return res.json({
+      suscripcion: {
+        estado: estado,
+        fecha_inicio: pago.fecha_pago,
+        fecha_expiracion: pago.fecha_expiracion,
+        dias_restantes: dias_restantes
+      }
+    });
+  } catch (err) {
+    console.error('suscripcion estado error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Crear sesión de pago con Stripe
+app.post('/pagos/crear-sesion', verifyToken, async (req, res) => {
+  try {
+    const { plan } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    if (!plan || !PLANES[plan]) return res.status(400).json({ error: 'plan inválido' });
+    if (!empresa_id) return res.status(400).json({ error: 'no empresa_id' });
+
+    const planSeleccionado = PLANES[plan];
+
+    // Crear sesión de Stripe Checkout
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'mxn',
+            product_data: {
+              name: planSeleccionado.nombre,
+              description: planSeleccionado.descripcion,
+            },
+            unit_amount: planSeleccionado.precio * 100, // Stripe usa centavos
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?pago=exitoso`,
+      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?pago=cancelado`,
+      metadata: {
+        empresa_id: empresa_id.toString(),
+        usuario_id: usuario_id.toString(),
+        plan: plan,
+        dias: planSeleccionado.dias.toString()
+      }
+    });
+
+    return res.json({ 
+      sessionId: session.id,
+      url: session.url
+    });
+
+  } catch (err) {
+    console.error('crear sesion stripe error', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Procesar pago (simulado - para pruebas sin Stripe)
+app.post('/pagos/procesar', verifyToken, async (req, res) => {
+  try {
+    const { plan, metodo_pago } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    if (!plan || !PLANES[plan]) return res.status(400).json({ error: 'plan inválido' });
+    if (!empresa_id) return res.status(400).json({ error: 'no empresa_id' });
+
+    const planSeleccionado = PLANES[plan];
+
+    // AQUÍ IRÍA LA INTEGRACIÓN CON LA API DE PAGOS REAL
+    // Por ahora, simulamos un pago exitoso
+    
+    const ahora = new Date();
+    const fecha_expiracion = new Date(ahora);
+    fecha_expiracion.setDate(fecha_expiracion.getDate() + planSeleccionado.dias);
+
+    // Registrar pago en tabla pagos
+    const pagoResult = await query(
+      `INSERT INTO pagos 
+       (empresa_id_pago, usuario_id, monto, moneda, metodo_pago, referencia_pago, estado_pago, dias_agregados, fecha_pago, fecha_expiracion, datos_pago) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [
+        empresa_id,
+        usuario_id,
+        planSeleccionado.precio,
+        'MXN',
+        metodo_pago || 'simulado',
+        'SIM-' + Date.now(),
+        'completado',
+        planSeleccionado.dias,
+        ahora,
+        fecha_expiracion,
+        JSON.stringify({ plan: plan, nombre_plan: planSeleccionado.nombre })
+      ]
+    );
+
+    return res.json({
+      success: true,
+      mensaje: `Pago procesado exitosamente. ${planSeleccionado.dias} días agregados.`,
+      pago: pagoResult.rows[0],
+      suscripcion: {
+        fecha_inicio: ahora,
+        fecha_expiracion: fecha_expiracion,
+        estado: 'activa'
+      }
+    });
+
+  } catch (err) {
+    console.error('procesar pago error', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Historial de pagos
+app.get('/pagos/historial', verifyToken, async (req, res) => {
+  try {
+    const empresa_id = req.user.empresa_id;
+    if (!empresa_id) return res.status(400).json({ error: 'no empresa_id' });
+
+    const result = await query(
+      'SELECT * FROM pagos WHERE empresa_id_pago = $1 ORDER BY fecha_pago DESC',
+      [empresa_id]
+    );
+
+    return res.json({ pagos: result.rows });
+  } catch (err) {
+    console.error('historial pagos error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ============= FIN SISTEMA DE PAGOS =============
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Backend listening on http://localhost:${port}`));
