@@ -113,6 +113,68 @@ function verifyToken(req, res, next) {
   });
 }
 
+// Middleware para verificar membresía activa
+async function verificarMembresia(req, res, next) {
+  try {
+    const empresa_id = req.user.empresa_id;
+    
+    // Si no es cliente, permitir acceso (admins, RH, etc)
+    if (req.user.rol !== 'cliente') {
+      return next();
+    }
+    
+    if (!empresa_id) {
+      return res.status(400).json({ 
+        error: 'No se encontró empresa asociada',
+        membresia_requerida: true 
+      });
+    }
+
+    // Verificar si tiene membresía activa
+    // Solo considera válidos los pagos con estado_pago = 'completado'
+    // Si estado_pago es NULL o cualquier otro valor, se considera inactivo
+    const result = await query(
+      `SELECT fecha_expiracion 
+       FROM pagos 
+       WHERE empresa_id_pago = $1 
+         AND estado_pago = 'completado' 
+         AND estado_pago IS NOT NULL
+       ORDER BY fecha_expiracion DESC 
+       LIMIT 1`,
+      [empresa_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(403).json({ 
+        error: 'No tienes una membresía activa. Por favor, realiza un pago para acceder a este servicio.',
+        membresia_activa: false,
+        membresia_requerida: true 
+      });
+    }
+
+    const pago = result.rows[0];
+    const ahora = new Date();
+    const fecha_expiracion = new Date(pago.fecha_expiracion);
+
+    if (fecha_expiracion < ahora) {
+      return res.status(403).json({ 
+        error: 'Tu membresía ha expirado. Por favor, renueva tu suscripción para continuar.',
+        membresia_activa: false,
+        membresia_expirada: true,
+        fecha_expiracion: pago.fecha_expiracion
+      });
+    }
+
+    // Membresía activa, continuar
+    console.log('[verificarMembresia] ✅ Membresía activa para empresa:', empresa_id);
+    next();
+
+  } catch (err) {
+    console.error('[verificarMembresia] Error:', err);
+    return res.status(500).json({ error: 'Error al verificar membresía' });
+  }
+}
+
 app.post('/webhook/frontend', (req, res) => {
   console.log('[webhook/frontend] received:', JSON.stringify(req.body));
   res.json({status: 'ok', path: '/webhook/frontend', received: req.body});
@@ -204,7 +266,7 @@ app.post('/auth/login-client', (req, res) => {
 });
 
 // Equipment census request (clients only) - con archivo de responsiva para laptops
-app.post('/equipment-requests', verifyToken, upload.single('responsiva'), async (req, res) => {
+app.post('/equipment-requests', verifyToken, verificarMembresia, upload.single('responsiva'), async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
     const { marca, modelo, no_serie, codigo_registro, memoria_ram, disco_duro, serie_disco_duro, sistema_operativo, procesador, nombre_usuario_equipo, tipo_equipo, nombre_equipo, empleado_id } = req.body || {};
@@ -531,6 +593,7 @@ app.get('/equipos', verifyToken, async (req, res) => {
         eq.ram,
         eq.disco_duro,
         eq.codigo_registro,
+        eq.status,
         emp.id_empleado,
         emp.nombre_empleado,
         e.nombre_empresa
@@ -541,9 +604,214 @@ app.get('/equipos', verifyToken, async (req, res) => {
       ORDER BY eq.id DESC
     `, [empresa_id]);
 
+    console.log('📦 Equipos encontrados:', result.rows.length);
+    if(result.rows.length > 0) {
+      console.log('📦 Primer equipo status:', result.rows[0].status);
+      console.log('📦 Primer equipo completo:', result.rows[0]);
+    }
+
     return res.json({ equipos: result.rows });
   } catch (err) {
     console.error('Error al obtener equipos:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Programar censo de equipo
+app.post('/agenda/programar-censo', verifyToken, async (req, res) => {
+  try {
+    // Permitir tanto a clientes como a admins
+    if (!req.user || (req.user.rol !== 'cliente' && req.user.rol !== 'admin')) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    
+    const { equipo_id, dia_agendado } = req.body;
+    
+    if (!equipo_id || !dia_agendado) {
+      return res.status(400).json({ error: 'equipo_id y dia_agendado son requeridos' });
+    }
+    
+    // Si es cliente, verificar que el equipo pertenece a su empresa
+    if (req.user.rol === 'cliente') {
+      const empresa_id = req.user.empresa_id;
+      const equipoResult = await query(
+        `SELECT eq.id FROM equipos eq
+         INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
+         WHERE eq.id = $1 AND e.id = $2`,
+        [equipo_id, empresa_id]
+      );
+      
+      if (equipoResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
+    }
+    // Si es admin, solo verificar que el equipo existe
+    else if (req.user.rol === 'admin') {
+      const equipoResult = await query('SELECT id FROM equipos WHERE id = $1', [equipo_id]);
+      if (equipoResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Equipo no encontrado' });
+      }
+    }
+    
+    // Crear registro en agenda con el equipo_id
+    const agendaResult = await query(
+      `INSERT INTO agenda (dia_agendado, status, usuario_id, equipo_id)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [dia_agendado, 'programado', req.user.id, equipo_id]
+    );
+    
+    const agenda_id = agendaResult.rows[0].id;
+    
+    // Actualizar el status del equipo de 'pendiente' a 'programado'
+    await query(
+      `UPDATE equipos SET status = 'programado' WHERE id = $1`,
+      [equipo_id]
+    );
+    
+    console.log('✅ Censo programado:', {
+      agenda_id,
+      equipo_id,
+      dia_agendado,
+      usuario: req.user.email,
+      status_actualizado: 'programado'
+    });
+    
+    return res.json({
+      success: true,
+      mensaje: 'Censo programado exitosamente',
+      agenda: agendaResult.rows[0]
+    });
+    
+  } catch (err) {
+    console.error('Error al programar censo:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Verificar censo realizado
+app.post('/agenda/verificar-censo', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'Solo administradores pueden verificar censos' });
+    }
+    
+    const { equipo_id, codigo, licencia } = req.body;
+    
+    console.log('📥 Datos recibidos para verificar censo:', { equipo_id, codigo, licencia });
+    
+    if (!equipo_id || !codigo || !licencia) {
+      return res.status(400).json({ error: 'equipo_id, codigo y licencia son requeridos' });
+    }
+    
+    // Actualizar status en tabla agenda
+    await query(
+      `UPDATE agenda SET status = 'registrado' WHERE equipo_id = $1 AND status = 'programado'`,
+      [equipo_id]
+    );
+    
+    // Actualizar status en tabla equipos
+    await query(
+      `UPDATE equipos SET status = 'registrado' WHERE id = $1`,
+      [equipo_id]
+    );
+    
+    // Insertar en tabla codigo_registro (nuevo registro por cada censo verificado)
+    const insertResult = await query(
+      `INSERT INTO codigo_registro (codigo, equipo_id, licencia) 
+       VALUES ($1, $2, $3) 
+       RETURNING *`,
+      [codigo, equipo_id, licencia]
+    );
+    
+    console.log('✅ Censo verificado y registro insertado:', {
+      registro_id: insertResult.rows[0].id,
+      equipo_id,
+      codigo,
+      licencia,
+      usuario: req.user.email,
+      status_actualizado: 'registrado'
+    });
+    
+    return res.json({
+      success: true,
+      mensaje: 'Censo verificado exitosamente'
+    });
+    
+  } catch (err) {
+    console.error('Error al verificar censo:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Obtener licencia de un equipo (admin only)
+app.get('/equipos/:id/licencia', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'Solo administradores pueden ver licencias' });
+    }
+    
+    const { id } = req.params;
+    
+    const result = await query(
+      `SELECT licencia FROM codigo_registro WHERE equipo_id = $1 LIMIT 1`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.json({ licencia: 'No registrada' });
+    }
+    
+    return res.json({ licencia: result.rows[0].licencia });
+    
+  } catch (err) {
+    console.error('Error al obtener licencia:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Obtener todos los equipos (admin only)
+app.get('/admin/equipos', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
+    
+    const result = await query(`
+      SELECT 
+        eq.id,
+        eq.id_equipo,
+        eq.tipo_equipo,
+        eq.marca,
+        eq.modelo,
+        eq.numero_serie,
+        eq.sistema_operativo,
+        eq.procesador,
+        eq.ram,
+        eq.disco_duro,
+        eq.codigo_registro,
+        eq.status,
+        emp.id_empleado,
+        emp.nombre_empleado,
+        e.nombre_empresa,
+        e.id as empresa_id,
+        (SELECT dia_agendado FROM agenda WHERE equipo_id = eq.id ORDER BY id DESC LIMIT 1) as dia_agendado
+      FROM equipos eq
+      INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
+      LEFT JOIN empleados emp ON eq.empleado_id = emp.id
+      ORDER BY eq.id DESC
+    `);
+
+    console.log('📦 Admin - Equipos encontrados:', result.rows.length);
+    if(result.rows.length > 0) {
+      console.log('📦 Ejemplo de equipo con fecha:', {
+        id: result.rows[0].id,
+        marca: result.rows[0].marca,
+        status: result.rows[0].status,
+        dia_agendado: result.rows[0].dia_agendado
+      });
+    }
+    
+    return res.json({ equipos: result.rows });
+  } catch (err) {
+    console.error('Error al obtener equipos (admin):', err);
     return res.status(500).json({ error: 'server error' });
   }
 });
@@ -561,7 +829,7 @@ app.get('/equipment-requests/mine', verifyToken, async (req, res) => {
 });
 
 // Download census tool
-app.get('/download/census-tool', verifyToken, (req, res) => {
+app.get('/download/census-tool', verifyToken, verificarMembresia, (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
     const path = require('path');
@@ -910,7 +1178,7 @@ app.get('/download/census-tool-linux', verifyToken, (req, res) => {
 // ==================== TICKETS ENDPOINTS ====================
 
 // Create ticket (cliente only)
-app.post('/tickets', verifyToken, async (req, res) => {
+app.post('/tickets', verifyToken, verificarMembresia, async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
     const { asunto, descripcion, prioridad } = req.body || {};
@@ -981,6 +1249,143 @@ app.get('/stripe/config', (req, res) => {
     publishableKey: process.env.STRIPE_PUBLISHABLE_KEY 
   });
 });
+
+
+// Crear Payment Intent para pago directo
+app.post('/stripe/create-payment-intent', verifyToken, async (req, res) => {
+  try {
+    const { plan } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    console.log('📥 Solicitud de Payment Intent:', { plan, empresa_id, usuario_id });
+
+    if (!plan || !PLANES[plan]) {
+      console.log('❌ Plan inválido:', plan);
+      return res.status(400).json({ error: 'plan inválido' });
+    }
+    if (!empresa_id) {
+      console.log('❌ No empresa_id');
+      return res.status(400).json({ error: 'no empresa_id' });
+    }
+
+    const planSeleccionado = PLANES[plan];
+    console.log('✅ Plan seleccionado:', planSeleccionado);
+
+    // Crear Payment Intent sin customer
+    console.log('🔵 Creando Payment Intent...');
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: planSeleccionado.precio * 100, // Centavos
+      currency: 'mxn',
+      metadata: {
+        empresa_id: empresa_id.toString(),
+        usuario_id: usuario_id.toString(),
+        plan: plan,
+        dias: planSeleccionado.dias.toString()
+      },
+      description: `${planSeleccionado.nombre} - ${planSeleccionado.dias} días`
+    });
+
+    console.log('✅ Payment Intent creado:', paymentIntent.id, 'Amount:', paymentIntent.amount);
+
+    return res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id
+    });
+
+  } catch (err) {
+    console.error('💥 Error creating payment intent:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Confirmar pago exitoso y registrar en BD
+app.post('/stripe/confirm-payment', verifyToken, async (req, res) => {
+  try {
+    const { paymentIntentId } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    console.log('📥 Confirmación de pago:', { paymentIntentId, empresa_id, usuario_id });
+
+    if (!paymentIntentId) {
+      console.log('❌ No paymentIntentId');
+      return res.status(400).json({ error: 'paymentIntentId requerido' });
+    }
+
+    // Recuperar el Payment Intent de Stripe
+    console.log('🔵 Recuperando Payment Intent de Stripe...');
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    console.log('✅ Payment Intent recuperado:', paymentIntent.status);
+
+    if (paymentIntent.status !== 'succeeded') {
+      console.log('❌ Pago no completado:', paymentIntent.status);
+      return res.status(400).json({ error: 'pago no completado', status: paymentIntent.status });
+    }
+
+    // Verificar que el pago pertenece a esta empresa
+    if (paymentIntent.metadata.empresa_id !== empresa_id.toString()) {
+      console.log('❌ Pago no autorizado');
+      return res.status(403).json({ error: 'pago no autorizado' });
+    }
+
+    const plan = paymentIntent.metadata.plan;
+    const dias = parseInt(paymentIntent.metadata.dias);
+    const planSeleccionado = PLANES[plan];
+
+    if (!planSeleccionado) {
+      console.log('❌ Plan inválido en metadata:', plan);
+      return res.status(400).json({ error: 'plan inválido' });
+    }
+
+    console.log('🔵 Registrando pago en base de datos...');
+
+    const ahora = new Date();
+    const fecha_expiracion = new Date(ahora);
+    fecha_expiracion.setDate(fecha_expiracion.getDate() + dias);
+
+    // Registrar pago en la base de datos
+    const pagoResult = await query(
+      `INSERT INTO pagos 
+       (empresa_id_pago, usuario_id, monto, moneda, metodo_pago, referencia_pago, estado_pago, dias_agregados, fecha_pago, fecha_expiracion, datos_pago) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      [
+        empresa_id,
+        usuario_id,
+        planSeleccionado.precio,
+        'MXN',
+        'stripe_payment_intent',
+        paymentIntentId,
+        'completado',
+        dias,
+        ahora,
+        fecha_expiracion,
+        JSON.stringify({
+          payment_intent_id: paymentIntentId,
+          amount: paymentIntent.amount,
+          currency: paymentIntent.currency,
+          payment_method: paymentIntent.payment_method
+        })
+      ]
+    );
+
+    console.log('✅ Pago registrado en BD:', pagoResult.rows[0].id);
+
+    return res.json({
+      success: true,
+      pago: pagoResult.rows[0],
+      mensaje: `¡Pago exitoso! Se agregaron ${dias} días a tu suscripción.`
+    });
+
+  } catch (err) {
+    console.error('💥 Error confirming payment:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+
+
+// ============= FIN STRIPE PAYMENT METHODS API =============
 
 // Obtener estado de suscripción de la empresa
 app.get('/suscripcion/estado', verifyToken, async (req, res) => {

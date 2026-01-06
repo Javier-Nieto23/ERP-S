@@ -28,11 +28,13 @@ async function run() {
       nombre_empresa VARCHAR(250),
       rfc VARCHAR(50),
       id_documento INTEGER,
-      id_equipo INTEGER
+      id_equipo INTEGER,
+      stripe_customer_id VARCHAR(255)
     )`);
 
-    // Agregar columna id_equipo si no existe
+    // Agregar columnas si no existen
     await query(`ALTER TABLE empresas ADD COLUMN IF NOT EXISTS id_equipo INTEGER`).catch(() => {});
+    await query(`ALTER TABLE empresas ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)`).catch(() => {});
 
     // Empleados
     await query(`CREATE TABLE IF NOT EXISTS empleados (
@@ -83,7 +85,7 @@ async function run() {
     // Codigo Registro
     await query(`CREATE TABLE IF NOT EXISTS codigo_registro (
       id SERIAL PRIMARY KEY,
-      codigo VARCHAR(255) UNIQUE,
+      codigo VARCHAR(255),
       equipo_id INTEGER REFERENCES equipos(id) ON DELETE CASCADE,
       licencia_id INTEGER
     )`);
@@ -100,7 +102,8 @@ async function run() {
       id SERIAL PRIMARY KEY,
       dia_agendado TIMESTAMP,
       status VARCHAR(80),
-      usuario_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL
+      usuario_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL,
+      equipo_id INTEGER REFERENCES equipos(id) ON DELETE SET NULL
     )`);
 
     // Tickets
@@ -212,6 +215,34 @@ async function run() {
       datos_pago JSONB
     )`);
     console.log('Pagos table created or already exists.');
+
+    // Agregar columna equipo_id a agenda si no existe
+    await query(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.columns 
+          WHERE table_name='agenda' AND column_name='equipo_id'
+        ) THEN
+          ALTER TABLE agenda ADD COLUMN equipo_id INTEGER REFERENCES equipos(id) ON DELETE SET NULL;
+        END IF;
+      END $$;
+    `);
+    console.log('Added equipo_id column to agenda table if it did not exist.');
+
+    // Eliminar restricción UNIQUE del campo codigo en codigo_registro
+    await query(`
+      DO $$ 
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'codigo_registro_codigo_key'
+        ) THEN
+          ALTER TABLE codigo_registro DROP CONSTRAINT codigo_registro_codigo_key;
+        END IF;
+      END $$;
+    `);
+    console.log('Removed UNIQUE constraint from codigo field in codigo_registro table if it existed.');
 
     console.log('DB initialization finished.');
   } catch (err) {

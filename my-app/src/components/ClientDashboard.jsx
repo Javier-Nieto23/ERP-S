@@ -1,4 +1,25 @@
 import { useState, useEffect, useRef } from 'react'
+import { loadStripe } from '@stripe/stripe-js'
+import StripePaymentModal from './StripePaymentModal'
+
+// Inyectar estilos de animación
+const styles = document.createElement('style')
+styles.textContent = `
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+`
+if (!document.querySelector('#censo-animations')) {
+  styles.id = 'censo-animations'
+  document.head.appendChild(styles)
+}
 
 export default function ClientDashboard(){
   const [view, setView] = useState('home')
@@ -19,7 +40,15 @@ export default function ClientDashboard(){
   const [tipoEquipoSeleccionado, setTipoEquipoSeleccionado] = useState('') // 'laptop' o 'escritorio'
   const [mostrarAvisoLaptop, setMostrarAvisoLaptop] = useState(false)
   const [archivoResponsiva, setArchivoResponsiva] = useState(null)
+  
+  // Estados para suscripción y pagos
+  const [suscripcion, setSuscripcion] = useState(null)
+  const [planes, setPlanes] = useState(null)
+  const [mostrarPagos, setMostrarPagos] = useState(false)
+  const [stripePromise, setStripePromise] = useState(null)
+  const [cargandoPago, setCargandoPago] = useState(false)
   const [responsaDescargada, setResponsivaDescargada] = useState(false)
+  const [membresiaActiva, setMembresiaActiva] = useState(false)
 
   // Estados para empleados
   const [empleados, setEmpleados] = useState([])
@@ -31,6 +60,74 @@ export default function ClientDashboard(){
 
   // Estados para equipos
   const [equipos, setEquipos] = useState([])
+  const [equipoAProgramar, setEquipoAProgramar] = useState(null)
+  const [fechaCenso, setFechaCenso] = useState('')
+  const [userRole, setUserRole] = useState('')
+
+  // Cargar configuración de Stripe al montar
+  useEffect(() => {
+    // Obtener rol del usuario desde localStorage
+    const user = JSON.parse(localStorage.getItem('user') || '{}')
+    setUserRole(user.rol || '')
+    
+    async function loadStripeConfig() {
+      try {
+        const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+        const res = await fetch(`${API}/stripe/config`)
+        if (res.ok) {
+          const { publishableKey } = await res.json()
+          setStripePromise(loadStripe(publishableKey))
+        }
+      } catch (e) {
+        console.error('Error loading Stripe config:', e)
+      }
+    }
+    loadStripeConfig()
+    
+    // Verificar si regresó de un pago
+    const urlParams = new URLSearchParams(window.location.search)
+    const pagoStatus = urlParams.get('pago')
+    if (pagoStatus === 'exitoso') {
+      setSuccess('✅ ¡Pago procesado exitosamente! Tu suscripción ha sido activada.')
+      setView('perfil')
+      // Limpiar URL
+      window.history.replaceState({}, document.title, window.location.pathname)
+    } else if (pagoStatus === 'cancelado') {
+      setError('❌ Pago cancelado. No se realizó ningún cargo.')
+      setView('perfil')
+      window.history.replaceState({}, document.title, window.location.pathname)
+    }
+  }, [])
+
+  // Verificar membresía al iniciar sesión o refrescar página
+  useEffect(() => {
+    async function verificarMembresiaInicial() {
+      try {
+        const token = localStorage.getItem('token')
+        const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+        
+        const resSuscripcion = await fetch(`${API}/suscripcion/estado`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        
+        if(resSuscripcion.ok) {
+          const dataSuscripcion = await resSuscripcion.json()
+          setSuscripcion(dataSuscripcion.suscripcion)
+          
+          // Verificar si la membresía está activa
+          const esActiva = dataSuscripcion.suscripcion && 
+                          dataSuscripcion.suscripcion.estado === 'activa' && 
+                          dataSuscripcion.suscripcion.dias_restantes > 0
+          setMembresiaActiva(esActiva)
+          console.log('🔍 Verificación inicial de membresía:', esActiva ? 'ACTIVA' : 'INACTIVA')
+        }
+      } catch(e) {
+        console.error('Error verificando membresía inicial:', e)
+      }
+    }
+    
+    verificarMembresiaInicial()
+  }, [])
 
   async function fetchMyRequests(){
     try{
@@ -262,7 +359,7 @@ export default function ClientDashboard(){
           nombre_equipo: data.nombre_equipo || ''
         })
         
-        setSuccess('✓ Archivo cargado correctamente. Los datos se han llenado en el formulario.')
+        // No mostrar mensaje de éxito aquí, solo cuando se complete el censo
         setError('')
         
       }catch(err){
@@ -347,6 +444,10 @@ export default function ClientDashboard(){
   
   // Cargar solicitudes al montar y cambiar vista
   useEffect(()=>{
+    // Limpiar mensajes al cambiar de vista
+    setError('')
+    setSuccess('')
+    
     if(view==='census') {
       fetchMyRequests()
       fetchEmpleados() // Cargar empleados para el combobox
@@ -462,6 +563,26 @@ export default function ClientDashboard(){
         const data = await res.json()
         setPerfil(data.perfil || null)
       }
+      
+      // También cargar suscripción y planes
+      const resSuscripcion = await fetch(`${API}/suscripcion/estado`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(resSuscripcion.ok){
+        const dataSuscripcion = await resSuscripcion.json()
+        setSuscripcion(dataSuscripcion.suscripcion)
+        // Verificar si la membresía está activa
+        const esActiva = dataSuscripcion.suscripcion && 
+                        dataSuscripcion.suscripcion.estado === 'activa' && 
+                        dataSuscripcion.suscripcion.dias_restantes > 0
+        setMembresiaActiva(esActiva)
+      }
+      
+      const resPlanes = await fetch(`${API}/planes`)
+      if(resPlanes.ok){
+        const dataPlanes = await resPlanes.json()
+        setPlanes(dataPlanes.planes)
+      }
     }catch(e){ console.error('Error fetching perfil', e) }
   }
 
@@ -474,9 +595,97 @@ export default function ClientDashboard(){
       })
       if(res.ok){
         const data = await res.json()
+        console.log('📦 Equipos recibidos:', data.equipos)
+        if(data.equipos && data.equipos.length > 0) {
+          console.log('📦 Primer equipo status:', data.equipos[0].status)
+        }
         setEquipos(data.equipos || [])
       }
     }catch(e){ console.error('Error fetching equipos', e) }
+  }
+
+  async function handleProgramarCenso(e){
+    e.preventDefault()
+    setError(''); setSuccess('')
+    
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      const res = await fetch(`${API}/agenda/programar-censo`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          equipo_id: equipoAProgramar.id,
+          dia_agendado: fechaCenso
+        })
+      })
+      
+      const data = await res.json()
+      if(!res.ok) return setError(data.error || 'Error al programar censo')
+      
+      setSuccess('✓ Censo programado exitosamente')
+      setEquipoAProgramar(null)
+      setFechaCenso('')
+      await fetchEquipos()
+    }catch(e){
+      setError('Error de conexión')
+    }
+  }
+
+  async function handleProcesarPago(plan){
+    setError(''); setSuccess('')
+    setCargandoPago(true)
+    
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      // Verificar que Stripe esté cargado
+      if (!stripePromise) {
+        setCargandoPago(false)
+        setMostrarPagos(false)
+        return setError('❌ Error: Stripe no se ha cargado correctamente. Por favor, recarga la página.')
+      }
+      
+      // Crear sesión de Stripe
+      const res = await fetch(`${API}/pagos/crear-sesion`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+        body: JSON.stringify({ plan })
+      })
+      
+      if (!res.ok) {
+        const data = await res.json()
+        setCargandoPago(false)
+        setMostrarPagos(false)
+        return setError(`❌ ${data.error || 'Error al crear sesión de pago'}`)
+      }
+      
+      const data = await res.json()
+      
+      // Redirigir a Stripe Checkout
+      const stripe = await stripePromise
+      const { error } = await stripe.redirectToCheckout({
+        sessionId: data.sessionId
+      })
+      
+      if (error) {
+        setCargandoPago(false)
+        setMostrarPagos(false)
+        setError(`❌ Error de Stripe: ${error.message}`)
+      }
+      // Si no hay error, el usuario será redirigido automáticamente
+      
+    }catch(e){ 
+      console.error('Error en handleProcesarPago:', e)
+      setCargandoPago(false)
+      setMostrarPagos(false)
+      setError('❌ Error de conexión al procesar pago. Verifica tu internet e intenta de nuevo.') 
+    }
   }
 
   async function handleTicketSubmit(e){
@@ -505,8 +714,44 @@ export default function ClientDashboard(){
         <button onClick={()=>setView('perfil')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='perfil'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>👤 Mi Perfil</button>
         <button onClick={()=>setView('empleados')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='empleados'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Empleados</button>
         <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos</button>
-        <button onClick={()=>setView('census')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='census'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Censar Equipo</button>
-        <button onClick={()=>setView('tickets')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='tickets'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Tickets</button>
+        <button 
+          onClick={()=>membresiaActiva ? setView('census') : setError('⚠️ Necesitas una membresía activa para censar equipos. Por favor, realiza un pago.')} 
+          disabled={!membresiaActiva}
+          style={{
+            display:'block',
+            width:'100%',
+            padding:8,
+            marginBottom:8,
+            background:view==='census'?'#334155':'transparent',
+            border:'none',
+            color:membresiaActiva?'white':'#94a3b8',
+            textAlign:'left',
+            cursor:membresiaActiva?'pointer':'not-allowed',
+            borderRadius:4,
+            opacity:membresiaActiva?1:0.6
+          }}
+        >
+          {membresiaActiva ? '📋 Censar Equipo' : '🔒 Censar Equipo (Bloqueado)'}
+        </button>
+        <button 
+          onClick={()=>membresiaActiva ? setView('tickets') : setError('⚠️ Necesitas una membresía activa para crear tickets. Por favor, realiza un pago.')} 
+          disabled={!membresiaActiva}
+          style={{
+            display:'block',
+            width:'100%',
+            padding:8,
+            marginBottom:8,
+            background:view==='tickets'?'#334155':'transparent',
+            border:'none',
+            color:membresiaActiva?'white':'#94a3b8',
+            textAlign:'left',
+            cursor:membresiaActiva?'pointer':'not-allowed',
+            borderRadius:4,
+            opacity:membresiaActiva?1:0.6
+          }}
+        >
+          {membresiaActiva ? '🎫 Tickets' : '🔒 Tickets (Bloqueado)'}
+        </button>
         
         {/* Botón de cerrar sesión al final */}
         <button 
@@ -533,6 +778,85 @@ export default function ClientDashboard(){
         </button>
       </div>
       <div style={{flex:1,padding:24,overflow:'auto'}}>
+        {/* Mensajes de éxito y error globales */}
+        {success && (
+          <div style={{
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: 'white',
+            padding: '16px 24px',
+            borderRadius: 12,
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+            animation: 'slideDown 0.3s ease-out'
+          }}>
+            <span style={{ fontSize: 24 }}>✓</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>¡Éxito!</div>
+              <div style={{ fontSize: 14, opacity: 0.95 }}>{success}</div>
+            </div>
+            <button
+              onClick={() => setSuccess('')}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                color: 'white',
+                borderRadius: '50%',
+                width: 32,
+                height: 32,
+                cursor: 'pointer',
+                fontSize: 18,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        
+        {error && (
+          <div style={{
+            background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+            color: 'white',
+            padding: '16px 24px',
+            borderRadius: 12,
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+            animation: 'slideDown 0.3s ease-out'
+          }}>
+            <span style={{ fontSize: 24 }}>⚠</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Error</div>
+              <div style={{ fontSize: 14, opacity: 0.95 }}>{error}</div>
+            </div>
+            <button
+              onClick={() => setError('')}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                color: 'white',
+                borderRadius: '50%',
+                width: 32,
+                height: 32,
+                cursor: 'pointer',
+                fontSize: 18,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        
         {view==='home' && (
           <div>
             <h2>Dashboard de Cliente</h2>
@@ -589,10 +913,6 @@ export default function ClientDashboard(){
                       <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.rfc || 'N/A'}</div>
                     </div>
                     <div>
-                      <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Días Asignados</div>
-                      <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.dias_asignados || 'N/A'}</div>
-                    </div>
-                    <div>
                       <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Total de Equipos</div>
                       <div style={{fontSize:16,color:'#1e293b',fontWeight:600}}>{perfil.total_equipos !== undefined ? perfil.total_equipos : 'N/A'}</div>
                     </div>
@@ -605,6 +925,86 @@ export default function ClientDashboard(){
                       </div>
                     )}
                   </div>
+                </div>
+                
+                {/* Información de Suscripción */}
+                <div style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,padding:24,marginBottom:24}}>
+                  <h3 style={{margin:'0 0 20px 0',fontSize:20,color:'#1e293b',borderBottom:'2px solid #10b981',paddingBottom:8}}>
+                    💳 Suscripción y Pagos
+                  </h3>
+                  
+                  {suscripcion ? (
+                    <>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:24}}>
+                        <div style={{padding:16,background:suscripcion.estado === 'activa' ? '#d1fae5' : '#fee2e2',borderRadius:8,textAlign:'center'}}>
+                          <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Estado</div>
+                          <div style={{fontSize:18,fontWeight:700,color:suscripcion.estado === 'activa' ? '#065f46' : '#991b1b',textTransform:'uppercase'}}>
+                            {suscripcion.estado === 'activa' ? '✅ ACTIVA' : suscripcion.estado === 'expirada' ? '⏰ EXPIRADA' : '❌ INACTIVA'}
+                          </div>
+                        </div>
+                        <div style={{padding:16,background:'#dbeafe',borderRadius:8,textAlign:'center'}}>
+                          <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Días Restantes</div>
+                          <div style={{fontSize:28,fontWeight:700,color:'#1e40af'}}>
+                            {suscripcion.dias_restantes}
+                          </div>
+                        </div>
+                        <div style={{padding:16,background:'#fef3c7',borderRadius:8,textAlign:'center'}}>
+                          <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Vence</div>
+                          <div style={{fontSize:14,fontWeight:600,color:'#92400e'}}>
+                            {suscripcion.fecha_expiracion ? new Date(suscripcion.fecha_expiracion).toLocaleDateString('es-ES') : 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {suscripcion.estado !== 'activa' && (
+                        <div style={{padding:16,background:'#fef2f2',border:'2px solid #fca5a5',borderRadius:8,marginBottom:20}}>
+                          <p style={{margin:0,color:'#991b1b',fontWeight:600,fontSize:15}}>
+                            ⚠️ Tu suscripción ha expirado. Renueva para continuar usando la plataforma.
+                          </p>
+                        </div>
+                      )}
+                      
+                      <button 
+                        onClick={()=>setMostrarPagos(true)}
+                        disabled={cargandoPago}
+                        style={{
+                          padding:'14px 36px',
+                          background: cargandoPago 
+                            ? '#cbd5e1' 
+                            : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                          color:'white',
+                          border:'none',
+                          borderRadius:10,
+                          cursor: cargandoPago ? 'not-allowed' : 'pointer',
+                          fontSize:16,
+                          fontWeight:700,
+                          boxShadow: cargandoPago 
+                            ? 'none' 
+                            : '0 6px 20px rgba(102, 126, 234, 0.4)',
+                          transition:'all 0.3s',
+                          opacity: cargandoPago ? 0.6 : 1
+                        }}
+                        onMouseEnter={(e)=>{
+                          if(!cargandoPago){
+                            e.currentTarget.style.transform = 'translateY(-2px)'
+                            e.currentTarget.style.boxShadow = '0 8px 24px rgba(102, 126, 234, 0.5)'
+                          }
+                        }}
+                        onMouseLeave={(e)=>{
+                          if(!cargandoPago){
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.4)'
+                          }
+                        }}
+                      >
+                        {cargandoPago ? '⏳ Procesando...' : '💳 Renovar / Extender Suscripción'}
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{textAlign:'center',padding:20}}>
+                      <p style={{color:'#64748b',margin:0}}>Cargando información de suscripción...</p>
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -627,7 +1027,7 @@ export default function ClientDashboard(){
                 <table style={{width:'100%',borderCollapse:'collapse',background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
                   <thead>
                     <tr style={{background:'#f1f5f9'}}>
-                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>ID Equipo</th>
+                      
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Tipo</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
@@ -636,12 +1036,14 @@ export default function ClientDashboard(){
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Procesador</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>RAM</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Status</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {equipos.map((eq) => (
                       <tr key={eq.id} style={{borderBottom:'1px solid #f1f5f9'}}>
-                        <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.id_equipo || 'N/A'}</td>
+                        
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
@@ -649,13 +1051,29 @@ export default function ClientDashboard(){
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.sistema_operativo || 'N/A'}</td>
                         <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.procesador || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.ram || 'N/A'}</td>
+                  
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
                           {eq.nombre_empleado ? (
                             <div>
                               <div style={{fontWeight:600}}>{eq.nombre_empleado}</div>
-                              <div style={{fontSize:12,color:'#64748b'}}>{eq.id_empleado}</div>
+                              
                             </div>
                           ) : 'Sin asignar'}
+                        </td>
+                        <td style={{padding:12,fontSize:14}}>
+                          <span style={{
+                            padding: '4px 12px',
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: 600,
+                            background: eq.status === 'activo' ? '#d1fae5' : eq.status === 'pendiente' ? '#fef3c7' : '#fee2e2',
+                            color: eq.status === 'activo' ? '#065f46' : eq.status === 'pendiente' ? '#92400e' : '#991b1b'
+                          }}>
+                            {eq.status === 'activo' ? '✓ Activo' : eq.status === 'pendiente' ? '⏳ Pendiente' : eq.status || 'N/A'}
+                          </span>
+                        </td>
+                        <td style={{padding:12}}>
+                          {/* Los clientes no pueden programar censos, solo los admins */}
                         </td>
                       </tr>
                     ))}
@@ -698,9 +1116,6 @@ export default function ClientDashboard(){
                     />
                   </label>
                 </div>
-                
-                {error && <div style={{color:'#ff6b6b',marginBottom:12}}>{error}</div>}
-                {success && <div style={{color:'#51cf66',marginBottom:12}}>{success}</div>}
                 
                 <div style={{display:'flex',gap:12}}>
                   <button type='submit' style={{padding:'10px 24px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>
@@ -763,6 +1178,46 @@ export default function ClientDashboard(){
         {view==='census' && (
           <div>
             <h2>Solicitar Censo de Equipo</h2>
+            
+            {/* Mensaje de éxito con animación */}
+            {success && (
+              <div style={{
+                background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color:'white',
+                padding:'20px 24px',
+                borderRadius:12,
+                marginBottom:24,
+                boxShadow:'0 4px 12px rgba(16, 185, 129, 0.3)',
+                fontSize:16,
+                fontWeight:600,
+                display:'flex',
+                alignItems:'center',
+                gap:12,
+                animation:'slideDown 0.5s ease-out',
+                border:'2px solid rgba(255,255,255,0.3)'
+              }}>
+                <span style={{fontSize:24}}>✅</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:18,marginBottom:4}}>¡Censo completado exitosamente!</div>
+                  <div style={{fontSize:14,opacity:0.95}}>Los datos del equipo han sido registrados. Puedes censar otro equipo.</div>
+                </div>
+              </div>
+            )}
+            
+            {/* Mensaje de error */}
+            {error && (
+              <div style={{
+                background:'#fee2e2',
+                color:'#991b1b',
+                padding:'16px 20px',
+                borderRadius:8,
+                marginBottom:20,
+                border:'2px solid #fca5a5',
+                fontSize:14
+              }}>
+                ⚠️ {error}
+              </div>
+            )}
             
             {/* Selección de tipo de equipo */}
             {!tipoEquipoSeleccionado && (
@@ -1115,6 +1570,135 @@ export default function ClientDashboard(){
           </div>
         )}
       </div>
+
+      {/* Modal de Pago con Stripe */}
+      {mostrarPagos && planes && (
+        <StripePaymentModal
+          planes={planes}
+          stripePromise={stripePromise}
+          onClose={() => {
+            setMostrarPagos(false)
+            setCargandoPago(false)
+          }}
+          onSelectPlan={handleProcesarPago}
+          cargandoPago={cargandoPago}
+          onPaymentSuccess={(result) => {
+            setSuccess(`✅ ${result.mensaje || '¡Pago exitoso!'}`)
+            setMostrarPagos(false)
+            setCargandoPago(false)
+            // Recargar información de suscripción
+            fetchSuscripcionEstado()
+          }}
+          onPaymentError={(mensaje) => {
+            setError(mensaje)
+            setCargandoPago(false)
+          }}
+        />
+      )}
+
+      {/* Modal para Programar Censo */}
+      {equipoAProgramar && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: 12,
+            padding: 32,
+            maxWidth: 500,
+            width: '90%',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
+          }}>
+            <h3 style={{margin: '0 0 24px 0', fontSize: 24, color: '#1e293b'}}>
+              📅 Programar Censo de Equipo
+            </h3>
+            
+            <div style={{marginBottom: 24, padding: 16, background: '#f1f5f9', borderRadius: 8}}>
+              <div style={{fontSize: 14, color: '#64748b', marginBottom: 4}}>Equipo a censar:</div>
+              <div style={{fontSize: 16, fontWeight: 600, color: '#1e293b'}}>
+                {equipoAProgramar.marca} {equipoAProgramar.modelo}
+              </div>
+              <div style={{fontSize: 14, color: '#64748b', marginTop: 4}}>
+                Serie: {equipoAProgramar.numero_serie}
+              </div>
+            </div>
+
+            <form onSubmit={handleProgramarCenso}>
+              <label style={{display: 'block', marginBottom: 24}}>
+                <span style={{display: 'block', fontSize: 14, fontWeight: 600, color: '#475569', marginBottom: 8}}>
+                  Fecha y Hora del Censo *
+                </span>
+                <input
+                  type="datetime-local"
+                  required
+                  value={fechaCenso}
+                  onChange={e => setFechaCenso(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  style={{
+                    width: '100%',
+                    padding: 12,
+                    border: '2px solid #e2e8f0',
+                    borderRadius: 8,
+                    fontSize: 16,
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                  onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                />
+              </label>
+
+              <div style={{display: 'flex', gap: 12}}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEquipoAProgramar(null)
+                    setFechaCenso('')
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    background: '#f1f5f9',
+                    color: '#475569',
+                    border: 'none',
+                    borderRadius: 8,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    padding: 12,
+                    background: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 8,
+                    fontSize: 16,
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Programar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
