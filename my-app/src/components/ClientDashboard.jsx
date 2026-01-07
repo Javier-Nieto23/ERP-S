@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { loadStripe } from '@stripe/stripe-js'
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import StripePaymentModal from './StripePaymentModal'
 
 // Inyectar estilos de animación
@@ -19,6 +20,140 @@ styles.textContent = `
 if (!document.querySelector('#censo-animations')) {
   styles.id = 'censo-animations'
   document.head.appendChild(styles)
+}
+
+// Componente para el formulario de pago de servicio
+function ServicioPaymentForm({ monto, datosEquipo, onSuccess, onError }) {
+  const stripe = useStripe()
+  const elements = useElements()
+  const [procesando, setProcesando] = useState(false)
+  const [mensaje, setMensaje] = useState('')
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+
+    if (!stripe || !elements) return
+
+    setProcesando(true)
+    setMensaje('')
+
+    try {
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const token = localStorage.getItem('token')
+
+      // Crear Payment Intent
+      const resIntent = await fetch(`${API}/servicios/create-payment-intent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          monto: monto,
+          concepto: 'Servicio de Instalación'
+        })
+      })
+
+      if (!resIntent.ok) {
+        const errorData = await resIntent.json()
+        throw new Error(errorData.error || 'Error al crear el pago')
+      }
+
+      const { clientSecret, paymentIntentId } = await resIntent.json()
+
+      // Confirmar el pago con Stripe
+      const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(clientSecret, {
+        payment_method: {
+          card: elements.getElement(CardElement)
+        }
+      })
+
+      if (stripeError) {
+        throw new Error(stripeError.message)
+      }
+
+      if (paymentIntent.status === 'succeeded') {
+        // Confirmar en backend y enviar datos del equipo
+        const resConfirm = await fetch(`${API}/servicios/confirm-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ 
+            paymentIntentId: paymentIntent.id,
+            datosEquipo: datosEquipo || null
+          })
+        })
+
+        if (!resConfirm.ok) {
+          throw new Error('Error al confirmar el pago')
+        }
+
+        setMensaje('✓ Pago procesado exitosamente')
+        if (onSuccess) onSuccess()
+      }
+    } catch (err) {
+      setMensaje(err.message || 'Error al procesar el pago')
+      if (onError) onError(err)
+    } finally {
+      setProcesando(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div style={{
+        background: '#f8fafc',
+        border: '2px solid #e2e8f0',
+        borderRadius: 8,
+        padding: 20,
+        marginBottom: 16
+      }}>
+        <CardElement options={{
+          style: {
+            base: {
+              fontSize: '16px',
+              color: '#1e293b',
+              '::placeholder': { color: '#94a3b8' }
+            }
+          }
+        }} />
+      </div>
+
+      {mensaje && (
+        <div style={{
+          padding: 12,
+          background: mensaje.includes('✓') ? '#d1fae5' : '#fee2e2',
+          color: mensaje.includes('✓') ? '#065f46' : '#991b1b',
+          borderRadius: 8,
+          marginBottom: 16,
+          fontSize: 14
+        }}>
+          {mensaje}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={!stripe || procesando}
+        style={{
+          width: '100%',
+          padding: 16,
+          background: procesando ? '#94a3b8' : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          border: 'none',
+          borderRadius: 8,
+          fontSize: 18,
+          fontWeight: 600,
+          cursor: procesando ? 'not-allowed' : 'pointer',
+          boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+        }}
+      >
+        {procesando ? '⏳ Procesando...' : `💳 Pagar $${monto.toLocaleString()} MXN`}
+      </button>
+    </form>
+  )
 }
 
 export default function ClientDashboard(){
@@ -63,6 +198,20 @@ export default function ClientDashboard(){
   const [equipoAProgramar, setEquipoAProgramar] = useState(null)
   const [fechaCenso, setFechaCenso] = useState('')
   const [userRole, setUserRole] = useState('')
+
+  // Estados para instalación
+  const [instalacionStep, setInstalacionStep] = useState(1) // 1: config, 2: censo, 3: pago
+  const [instalacionConfig, setInstalacionConfig] = useState({
+    tipoEquipo: '',
+    numBasesDatos: '',
+    nombresBD: [] // Array dinámico para nombres de bases de datos
+  })
+  const [instalacionForm, setInstalacionForm] = useState({ 
+    marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', 
+    disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', 
+    nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' 
+  })
+  const [mostrarModalEmpleado, setMostrarModalEmpleado] = useState(false)
 
   // Cargar configuración de Stripe al montar
   useEffect(() => {
@@ -714,6 +863,7 @@ export default function ClientDashboard(){
         <button onClick={()=>setView('perfil')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='perfil'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>👤 Mi Perfil</button>
         <button onClick={()=>setView('empleados')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='empleados'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Empleados</button>
         <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos</button>
+        <button onClick={()=>setView('instalacion')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalacion'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>⬇️ Instalación</button>
         <button 
           onClick={()=>membresiaActiva ? setView('census') : setError('⚠️ Necesitas una membresía activa para censar equipos. Por favor, realiza un pago.')} 
           disabled={!membresiaActiva}
@@ -1066,10 +1216,27 @@ export default function ClientDashboard(){
                             borderRadius: 12,
                             fontSize: 12,
                             fontWeight: 600,
-                            background: eq.status === 'activo' ? '#d1fae5' : eq.status === 'pendiente' ? '#fef3c7' : '#fee2e2',
-                            color: eq.status === 'activo' ? '#065f46' : eq.status === 'pendiente' ? '#92400e' : '#991b1b'
+                            background: 
+                              eq.status === 'activo' ? '#d1fae5' : 
+                              eq.status === 'pendiente' ? '#fef3c7' : 
+                              eq.status === 'registrado' ? '#dbeafe' :
+                              eq.status === 'por instalar' ? '#fef08a' :
+                              eq.status === 'instalacion programada' ? '#fed7aa' :
+                              '#fee2e2',
+                            color: 
+                              eq.status === 'activo' ? '#065f46' : 
+                              eq.status === 'pendiente' ? '#92400e' : 
+                              eq.status === 'registrado' ? '#1e40af' :
+                              eq.status === 'por instalar' ? '#854d0e' :
+                              eq.status === 'instalacion programada' ? '#9a3412' :
+                              '#991b1b'
                           }}>
-                            {eq.status === 'activo' ? '✓ Activo' : eq.status === 'pendiente' ? '⏳ Pendiente' : eq.status || 'N/A'}
+                            {eq.status === 'activo' ? '✓ Activo' : 
+                             eq.status === 'pendiente' ? '⏳ Pendiente' : 
+                             eq.status === 'registrado' ? '📋 Registrado' :
+                             eq.status === 'por instalar' ? '🔧 Por Instalar' :
+                             eq.status === 'instalacion programada' ? '📅 Instalación Programada' :
+                             eq.status || 'N/A'}
                           </span>
                         </td>
                         <td style={{padding:12}}>
@@ -1696,6 +1863,649 @@ export default function ClientDashboard(){
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      
+      {/* Vista de Instalación */}
+      {view==='instalacion' && (
+        <div>
+          <h2 style={{marginBottom:24}}>⬇️ Solicitud de Instalación</h2>
+          
+          {/* Indicador de Pasos */}
+          <div style={{display:'flex',justifyContent:'center',marginBottom:32,gap:16}}>
+            {[
+              {num:1,label:'Configuración'},
+              {num:2,label:'Censo de Equipo'},
+              {num:3,label:'Pago'}
+            ].map((paso)=>(
+              <div key={paso.num} style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{
+                  width:40,
+                  height:40,
+                  borderRadius:'50%',
+                  background:instalacionStep>=paso.num?'#3b82f6':'#e2e8f0',
+                  color:instalacionStep>=paso.num?'white':'#94a3b8',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                  fontWeight:700,
+                  fontSize:16
+                }}>
+                  {paso.num}
+                </div>
+                <span style={{fontSize:14,fontWeight:600,color:instalacionStep>=paso.num?'#1e293b':'#94a3b8'}}>
+                  {paso.label}
+                </span>
+                {paso.num<3 && <span style={{color:'#cbd5e1',marginLeft:8}}>→</span>}
+              </div>
+            ))}
+          </div>
+
+          {/* Paso 1: Configuración */}
+          {instalacionStep===1 && (
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+              <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
+                Configuración Inicial
+              </h3>
+              
+              <label style={{display:'block',marginBottom:20}}>
+                <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>
+                  ¿Es un equipo de escritorio o laptop? *
+                </div>
+                <select
+                  value={instalacionConfig.tipoEquipo}
+                  onChange={(e)=>setInstalacionConfig({...instalacionConfig,tipoEquipo:e.target.value})}
+                  style={{
+                    width:'100%',
+                    padding:12,
+                    border:'2px solid #e2e8f0',
+                    borderRadius:8,
+                    fontSize:16,
+                    outline:'none',
+                    cursor:'pointer'
+                  }}
+                >
+                  <option value="">Selecciona el tipo de equipo</option>
+                  <option value="escritorio">Escritorio</option>
+                  <option value="laptop">Laptop</option>
+                </select>
+              </label>
+
+              <label style={{display:'block',marginBottom:20}}>
+                <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>
+                  ¿A cuántas bases de datos se va a conectar? *
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  max="10"
+                  value={instalacionConfig.numBasesDatos}
+                  onChange={(e)=>{
+                    const num = parseInt(e.target.value) || 0
+                    setInstalacionConfig({
+                      ...instalacionConfig,
+                      numBasesDatos:e.target.value,
+                      nombresBD: Array(num).fill('').map((_, i) => instalacionConfig.nombresBD[i] || '')
+                    })
+                  }}
+                  placeholder="Número de bases de datos"
+                  style={{
+                    width:'100%',
+                    padding:12,
+                    border:'2px solid #e2e8f0',
+                    borderRadius:8,
+                    fontSize:16,
+                    outline:'none'
+                  }}
+                />
+              </label>
+
+              {/* Renderizar inputs dinámicamente según el número de bases de datos */}
+              {instalacionConfig.numBasesDatos > 0 && Array.from({ length: parseInt(instalacionConfig.numBasesDatos) || 0 }).map((_, index) => (
+                <label key={index} style={{display:'block',marginBottom:20}}>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>
+                    Nombre de la Base de Datos {index + 1} *
+                  </div>
+                  <input
+                    type="text"
+                    value={instalacionConfig.nombresBD[index] || ''}
+                    onChange={(e)=>{
+                      const newNombres = [...instalacionConfig.nombresBD]
+                      newNombres[index] = e.target.value
+                      setInstalacionConfig({...instalacionConfig, nombresBD: newNombres})
+                    }}
+                    placeholder={`Nombre de la base de datos ${index + 1}`}
+                    style={{
+                      width:'100%',
+                      padding:12,
+                      border:'2px solid #e2e8f0',
+                      borderRadius:8,
+                      fontSize:16,
+                      outline:'none'
+                    }}
+                  />
+                </label>
+              ))}
+
+              <button
+                onClick={()=>{
+                  if(!instalacionConfig.tipoEquipo || !instalacionConfig.numBasesDatos){
+                    setError('Por favor completa todos los campos requeridos')
+                    return
+                  }
+                  // Validar que todos los nombres de BD estén completos
+                  const numBD = parseInt(instalacionConfig.numBasesDatos) || 0
+                  if(numBD > 0){
+                    for(let i = 0; i < numBD; i++){
+                      if(!instalacionConfig.nombresBD[i] || instalacionConfig.nombresBD[i].trim() === ''){
+                        setError(`Ingresa el nombre de la base de datos ${i + 1}`)
+                        return
+                      }
+                    }
+                  }
+                  setInstalacionForm({...instalacionForm,tipo_equipo:instalacionConfig.tipoEquipo})
+                  setInstalacionStep(2)
+                  fetchEmpleados()
+                }}
+                style={{
+                  width:'100%',
+                  padding:16,
+                  background:'#3b82f6',
+                  color:'white',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:18,
+                  fontWeight:600,
+                  cursor:'pointer'
+                }}
+              >
+                Continuar al Censo →
+              </button>
+            </div>
+          )}
+
+          {/* Paso 2: Censo del Equipo */}
+          {instalacionStep===2 && (
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+              <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
+                Censo del Equipo
+              </h3>
+
+              {/* Censo Automático */}
+              <div style={{background:'#f0fdf4',border:'2px solid #10b981',borderRadius:8,padding:20,marginBottom:24}}>
+                <h4 style={{margin:'0 0 8px 0',fontSize:18,color:'#047857'}}>⚡ Censo Automático (Recomendado)</h4>
+                <p style={{margin:'0 0 16px 0',fontSize:14,color:'#065f46'}}>Descarga la herramienta para tu sistema operativo, ejecútala y sube el archivo .txt generado.</p>
+                
+                <div style={{display:'flex',gap:12,marginBottom:16}}>
+                  <button 
+                    type='button' 
+                    onClick={handleDownloadWindowsTool} 
+                    style={{
+                      flex:1,
+                      padding:'12px 24px',
+                      background:'#0ea5e9',
+                      color:'white',
+                      border:'none',
+                      borderRadius:6,
+                      cursor:'pointer',
+                      fontSize:15,
+                      fontWeight:600,
+                      display:'flex',
+                      alignItems:'center',
+                      justifyContent:'center',
+                      gap:8
+                    }}
+                  >
+                    🪟 Windows (.bat)
+                  </button>
+                  <button 
+                    type='button' 
+                    onClick={handleDownloadAutoTool} 
+                    style={{
+                      flex:1,
+                      padding:'12px 24px',
+                      background:'#10b981',
+                      color:'white',
+                      border:'none',
+                      borderRadius:6,
+                      cursor:'pointer',
+                      fontSize:15,
+                      fontWeight:600,
+                      display:'flex',
+                      alignItems:'center',
+                      justifyContent:'center',
+                      gap:8
+                    }}
+                  >
+                    🐧 Linux (.sh)
+                  </button>
+                </div>
+                
+                {/* Campo para subir archivo txt */}
+                <div style={{padding:16,background:'#e0f2fe',borderRadius:8,border:'2px dashed #0284c7'}}>
+                  <label style={{display:'block',marginBottom:8,fontSize:14,fontWeight:600,color:'#0c4a6e'}}>
+                    📁 Cargar archivo de censo (.txt)
+                  </label>
+                  <input 
+                    type='file' 
+                    accept='.txt' 
+                    onChange={(e)=>{
+                      const file = e.target.files[0]
+                      if(!file) return
+                      
+                      if(!file.name.endsWith('.txt')){
+                        setError('Por favor selecciona un archivo .txt')
+                        return
+                      }
+                      
+                      const reader = new FileReader()
+                      reader.onload = (event) => {
+                        try{
+                          const content = event.target.result
+                          const lines = content.split('\n')
+                          const data = {}
+                          
+                          lines.forEach(line => {
+                            if(line.includes('=')){
+                              const [key, value] = line.split('=')
+                              if(key && value){
+                                data[key.trim()] = value.trim()
+                              }
+                            }
+                          })
+                          
+                          // Llenar formulario de instalación con los datos
+                          setInstalacionForm({
+                            marca: data.marca || instalacionForm.marca,
+                            modelo: data.modelo || instalacionForm.modelo,
+                            no_serie: data.no_serie || instalacionForm.no_serie,
+                            codigo_registro: data.codigo_registro || instalacionForm.codigo_registro,
+                            memoria_ram: data.memoria_ram || instalacionForm.memoria_ram,
+                            disco_duro: data.disco_duro || instalacionForm.disco_duro,
+                            serie_disco_duro: data.serie_disco_duro || instalacionForm.serie_disco_duro,
+                            sistema_operativo: data.sistema_operativo || instalacionForm.sistema_operativo,
+                            procesador: data.procesador || instalacionForm.procesador,
+                            nombre_usuario_equipo: data.nombre_usuario_equipo || instalacionForm.nombre_usuario_equipo,
+                            tipo_equipo: instalacionForm.tipo_equipo, // Mantener el tipo del paso 1
+                            nombre_equipo: data.nombre_equipo || instalacionForm.nombre_equipo,
+                            empleado_id: instalacionForm.empleado_id
+                          })
+                          
+                          setSuccess('✓ Datos cargados desde archivo')
+                          setError('')
+                          
+                        }catch(err){
+                          console.error('Error al parsear archivo:', err)
+                          setError('Error al leer el archivo. Asegúrate de que sea el archivo generado por la herramienta.')
+                        }
+                      }
+                      
+                      reader.onerror = () => {
+                        setError('Error al leer el archivo')
+                      }
+                      
+                      reader.readAsText(file)
+                    }}
+                    style={{
+                      width:'100%',
+                      padding:8,
+                      fontSize:14,
+                      border:'1px solid #0284c7',
+                      borderRadius:4,
+                      background:'white',
+                      cursor:'pointer'
+                    }}
+                  />
+                  <p style={{margin:'8px 0 0 0',fontSize:12,color:'#075985'}}>Selecciona el archivo .txt generado por la herramienta de censo</p>
+                </div>
+              </div>
+
+              {/* Formulario Manual */}
+              <h4 style={{fontSize:16,fontWeight:600,color:'#64748b',marginBottom:16}}>O completa manualmente:</h4>
+
+              <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:16,marginBottom:20}}>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Marca *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.marca}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,marca:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Modelo *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.modelo}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,modelo:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Número de Serie *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.no_serie}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,no_serie:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Código de Registro *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.codigo_registro}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,codigo_registro:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>RAM *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.memoria_ram}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,memoria_ram:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Disco Duro *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.disco_duro}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,disco_duro:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Serie Disco Duro</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.serie_disco_duro}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,serie_disco_duro:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Sistema Operativo *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.sistema_operativo}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,sistema_operativo:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Procesador *</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.procesador}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,procesador:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Nombre Usuario Equipo</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.nombre_usuario_equipo}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,nombre_usuario_equipo:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Nombre del Equipo</div>
+                  <input
+                    type="text"
+                    value={instalacionForm.nombre_equipo}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,nombre_equipo:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                  />
+                </label>
+                <label>
+                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <span>Empleado Asignado *</span>
+                    <button
+                      type="button"
+                      onClick={()=>setMostrarModalEmpleado(true)}
+                      style={{
+                        padding:'4px 12px',
+                        background:'#10b981',
+                        color:'white',
+                        border:'none',
+                        borderRadius:6,
+                        fontSize:12,
+                        cursor:'pointer'
+                      }}
+                    >
+                      + Nuevo
+                    </button>
+                  </div>
+                  <select
+                    value={instalacionForm.empleado_id}
+                    onChange={(e)=>setInstalacionForm({...instalacionForm,empleado_id:e.target.value})}
+                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16,cursor:'pointer'}}
+                  >
+                    <option value="">Selecciona un empleado</option>
+                    {empleados.map(emp=>(
+                      <option key={emp.id} value={emp.id}>{emp.nombre_empleado} ({emp.id_empleado})</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div style={{display:'flex',gap:12}}>
+                <button
+                  onClick={()=>setInstalacionStep(1)}
+                  style={{
+                    flex:1,
+                    padding:16,
+                    background:'#f1f5f9',
+                    color:'#475569',
+                    border:'none',
+                    borderRadius:8,
+                    fontSize:16,
+                    fontWeight:600,
+                    cursor:'pointer'
+                  }}
+                >
+                  ← Atrás
+                </button>
+                <button
+                  onClick={()=>{
+                    if(!instalacionForm.marca || !instalacionForm.modelo || !instalacionForm.no_serie || 
+                       !instalacionForm.codigo_registro || !instalacionForm.memoria_ram || !instalacionForm.disco_duro ||
+                       !instalacionForm.sistema_operativo || !instalacionForm.procesador || !instalacionForm.empleado_id){
+                      setError('Por favor completa todos los campos requeridos (*)')
+                      return
+                    }
+                    setInstalacionStep(3)
+                  }}
+                  style={{
+                    flex:1,
+                    padding:16,
+                    background:'#3b82f6',
+                    color:'white',
+                    border:'none',
+                    borderRadius:8,
+                    fontSize:16,
+                    fontWeight:600,
+                    cursor:'pointer'
+                  }}
+                >
+                  Continuar al Pago →
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Paso 3: Pago */}
+          {instalacionStep===3 && (
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+              <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
+                Pago del Servicio de Instalación
+              </h3>
+
+              <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:20,marginBottom:24}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                  <span style={{fontSize:16,color:'#64748b'}}>Servicio de Instalación</span>
+                  <span style={{fontSize:24,fontWeight:700,color:'#1e293b'}}>$2,500 MXN</span>
+                </div>
+                <div style={{fontSize:14,color:'#64748b',lineHeight:1.6,marginBottom:12}}>
+                  Incluye instalación, configuración de {instalacionConfig.numBasesDatos} base(s) de datos y soporte técnico inicial.
+                </div>
+                <div style={{background:'white',borderRadius:6,padding:12,fontSize:13,color:'#475569'}}>
+                  <div style={{marginBottom:4}}><strong>Equipo:</strong> {instalacionConfig.tipoEquipo}</div>
+                  <div style={{marginBottom:4}}><strong>Bases de datos:</strong> {instalacionConfig.numBasesDatos}</div>
+                  {instalacionConfig.nombresBD && instalacionConfig.nombresBD.length > 0 && instalacionConfig.nombresBD.map((nombre, index) => (
+                    nombre && <div key={index} style={{marginBottom:4}}><strong>BD {index + 1}:</strong> {nombre}</div>
+                  ))}
+                </div>
+              </div>
+
+              {stripePromise && (
+                <Elements stripe={stripePromise}>
+                  <ServicioPaymentForm
+                    monto={2500}
+                    datosEquipo={{
+                      marca: instalacionForm.marca,
+                      modelo: instalacionForm.modelo,
+                      numero_serie: instalacionForm.no_serie,
+                      codigo_registro: instalacionForm.codigo_registro,
+                      memoria_ram: instalacionForm.memoria_ram,
+                      disco_duro: instalacionForm.disco_duro,
+                      serie_disco_duro: instalacionForm.serie_disco_duro,
+                      sistema_operativo: instalacionForm.sistema_operativo,
+                      procesador: instalacionForm.procesador,
+                      nombre_usuario_equipo: instalacionForm.nombre_usuario_equipo,
+                      tipo_equipo: instalacionForm.tipo_equipo,
+                      nombre_equipo: instalacionForm.nombre_equipo,
+                      empleado_id: instalacionForm.empleado_id
+                    }}
+                    onSuccess={async()=>{
+                      setSuccess('✓ Pago realizado exitosamente. Tu instalación ha sido programada y el equipo registrado.')
+                      setInstalacionStep(1)
+                      setInstalacionConfig({tipoEquipo:'',numBasesDatos:'',nombresBD:[]})
+                      setInstalacionForm({marca:'',modelo:'',no_serie:'',codigo_registro:'',memoria_ram:'',
+                        disco_duro:'',serie_disco_duro:'',sistema_operativo:'',procesador:'',
+                        nombre_usuario_equipo:'',tipo_equipo:'',nombre_equipo:'',empleado_id:''})
+                    }}
+                    onError={(err)=>{
+                      setError(err.message || 'Error al procesar el pago')
+                    }}
+                  />
+                </Elements>
+              )}
+
+              <button
+                onClick={()=>setInstalacionStep(2)}
+                style={{
+                  width:'100%',
+                  padding:16,
+                  background:'#f1f5f9',
+                  color:'#475569',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:16,
+                  fontWeight:600,
+                  cursor:'pointer',
+                  marginTop:16
+                }}
+              >
+                ← Atrás
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal para Registrar Nuevo Empleado */}
+      {mostrarModalEmpleado && (
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:1000}}>
+          <div style={{background:'white',borderRadius:12,padding:24,maxWidth:500,width:'90%',boxShadow:'0 4px 20px rgba(0,0,0,0.2)'}}>
+            <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>Registrar Nuevo Empleado</h3>
+            
+            <label style={{display:'block',marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>ID Empleado *</div>
+              <input
+                type="text"
+                value={empleadoForm.id_empleado}
+                onChange={(e)=>setEmpleadoForm({...empleadoForm,id_empleado:e.target.value})}
+                style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+              />
+            </label>
+
+            <label style={{display:'block',marginBottom:20}}>
+              <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Nombre Completo *</div>
+              <input
+                type="text"
+                value={empleadoForm.nombre_empleado}
+                onChange={(e)=>setEmpleadoForm({...empleadoForm,nombre_empleado:e.target.value})}
+                style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+              />
+            </label>
+
+            <div style={{display:'flex',gap:12}}>
+              <button
+                onClick={()=>{
+                  setMostrarModalEmpleado(false)
+                  setEmpleadoForm({id_empleado:'',nombre_empleado:''})
+                }}
+                style={{
+                  flex:1,
+                  padding:12,
+                  background:'#f1f5f9',
+                  color:'#475569',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:16,
+                  fontWeight:600,
+                  cursor:'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async()=>{
+                  if(!empleadoForm.id_empleado || !empleadoForm.nombre_empleado){
+                    setError('Por favor completa todos los campos')
+                    return
+                  }
+                  try{
+                    const token = localStorage.getItem('token')
+                    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                    const res = await fetch(`${API}/empleados`, {
+                      method:'POST',
+                      headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
+                      body: JSON.stringify(empleadoForm)
+                    })
+                    const data = await res.json()
+                    if (!res.ok) return setError(data.error || 'Error al crear empleado')
+                    setSuccess('✓ Empleado registrado exitosamente')
+                    setEmpleadoForm({id_empleado:'',nombre_empleado:''})
+                    setMostrarModalEmpleado(false)
+                    await fetchEmpleados() // Refrescar lista
+                  }catch(e){ 
+                    setError('Error de conexión') 
+                  }
+                }}
+                style={{
+                  flex:1,
+                  padding:12,
+                  background:'#10b981',
+                  color:'white',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:16,
+                  fontWeight:600,
+                  cursor:'pointer'
+                }}
+              >
+                Guardar
+              </button>
+            </div>
           </div>
         </div>
       )}

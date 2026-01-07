@@ -216,6 +216,22 @@ async function run() {
     )`);
     console.log('Pagos table created or already exists.');
 
+    // Tabla de pagos de servicios (instalación, etc.)
+    await query(`CREATE TABLE IF NOT EXISTS pagos_servicios (
+      id SERIAL PRIMARY KEY,
+      empresa_id INTEGER REFERENCES empresas(id) ON DELETE CASCADE,
+      usuario_id INTEGER REFERENCES usuarios_empresas(id) ON DELETE SET NULL,
+      tipo_servicio VARCHAR(100) NOT NULL,
+      monto DECIMAL(10,2) NOT NULL,
+      moneda VARCHAR(10) DEFAULT 'MXN',
+      status VARCHAR(50) DEFAULT 'pendiente',
+      metodo_pago VARCHAR(50),
+      referencia_pago VARCHAR(255),
+      fecha_pago TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      datos_adicionales JSONB
+    )`);
+    console.log('Pagos_servicios table created or already exists.');
+
     // Agregar columna equipo_id a agenda si no existe
     await query(`
       DO $$ 

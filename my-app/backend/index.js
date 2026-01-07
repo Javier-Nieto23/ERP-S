@@ -769,6 +769,155 @@ app.get('/equipos/:id/licencia', verifyToken, async (req, res) => {
   }
 });
 
+// Obtener censos programados (admin only)
+app.get('/admin/censos-programados', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    
+    const result = await query(`
+      SELECT 
+        ag.id,
+        ag.dia_agendado,
+        ag.status,
+        eq.id as equipo_id,
+        eq.marca,
+        eq.modelo,
+        eq.numero_serie,
+        e.nombre_empresa
+      FROM agenda ag
+      INNER JOIN equipos eq ON ag.equipo_id = eq.id
+      INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
+      WHERE ag.status IN ('programado', 'registrado')
+      ORDER BY ag.dia_agendado ASC
+    `);
+    
+    return res.json({ censos: result.rows });
+    
+  } catch (err) {
+    console.error('Error al obtener censos programados:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Obtener equipos por instalar (admin only)
+app.get('/admin/equipos-por-instalar', verifyToken, async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const result = await query(
+      `SELECT eq.*, e.nombre_empresa, emp.nombre_empleado as nombre_empleado
+       FROM equipos eq
+       LEFT JOIN empresas e ON eq.id_equipo = e.id
+       LEFT JOIN empleados emp ON eq.empleado_id = emp.id
+       WHERE eq.status = 'por instalar'
+       ORDER BY eq.id DESC`
+    );
+
+    console.log('📦 Equipos por instalar encontrados:', result.rows.length);
+
+    return res.json({ equipos: result.rows });
+  } catch (err) {
+    console.error('Error obteniendo equipos por instalar:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Obtener instalaciones programadas (admin only)
+app.get('/admin/instalaciones-programadas', verifyToken, async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const result = await query(`
+      SELECT 
+        ag.id,
+        ag.dia_agendado,
+        ag.status,
+        eq.id as equipo_id,
+        eq.marca,
+        eq.modelo,
+        eq.numero_serie,
+        eq.tipo_equipo,
+        e.nombre_empresa
+      FROM agenda ag
+      INNER JOIN equipos eq ON ag.equipo_id = eq.id
+      LEFT JOIN empresas e ON eq.id_equipo = e.id
+      WHERE ag.status = 'instalacion programada'
+      ORDER BY ag.dia_agendado ASC
+    `);
+
+    console.log('📅 Instalaciones programadas encontradas:', result.rows.length);
+
+    return res.json({ instalaciones: result.rows });
+  } catch (err) {
+    console.error('Error obteniendo instalaciones programadas:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Programar instalación (admin only)
+app.post('/admin/programar-instalacion', verifyToken, async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const { equipo_id, dia_agendado } = req.body;
+
+    if (!equipo_id || !dia_agendado) {
+      return res.status(400).json({ error: 'equipo_id y dia_agendado son requeridos' });
+    }
+
+    // Verificar que el equipo existe y tiene status 'por instalar'
+    const equipoResult = await query(
+      'SELECT * FROM equipos WHERE id = $1 AND status = $2',
+      [equipo_id, 'por instalar']
+    );
+
+    if (equipoResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipo no encontrado o no está en status "por instalar"' });
+    }
+
+    // Crear registro en agenda
+    const agendaResult = await query(
+      `INSERT INTO agenda (dia_agendado, status, usuario_id, equipo_id)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [dia_agendado, 'instalacion programada', req.user.id, equipo_id]
+    );
+
+    const agenda_id = agendaResult.rows[0].id;
+
+    // Actualizar el status del equipo a 'instalacion programada'
+    await query(
+      `UPDATE equipos SET status = 'instalacion programada' WHERE id = $1`,
+      [equipo_id]
+    );
+
+    console.log('✅ Instalación programada:', {
+      agenda_id,
+      equipo_id,
+      dia_agendado,
+      usuario: req.user.email,
+      status_actualizado: 'instalacion programada'
+    });
+
+    return res.json({
+      success: true,
+      mensaje: 'Instalación programada exitosamente',
+      agenda_id
+    });
+
+  } catch (err) {
+    console.error('Error programando instalación:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
 // Obtener todos los equipos (admin only)
 app.get('/admin/equipos', verifyToken, async (req, res) => {
   try {
@@ -1558,6 +1707,169 @@ app.get('/pagos/historial', verifyToken, async (req, res) => {
     return res.status(500).json({ error: 'server error' });
   }
 });
+
+// ============= PAGOS DE SERVICIOS (INSTALACIÓN) =============
+
+// Crear Payment Intent para servicio de instalación
+app.post('/servicios/create-payment-intent', verifyToken, async (req, res) => {
+  try {
+    const { monto, concepto, datosServicio } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    console.log('📥 Solicitud de Payment Intent para servicio:', { monto, concepto, empresa_id, usuario_id });
+
+    if (!monto || monto <= 0) {
+      return res.status(400).json({ error: 'Monto inválido' });
+    }
+    if (!empresa_id) {
+      return res.status(400).json({ error: 'no empresa_id' });
+    }
+
+    // Crear Payment Intent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: monto * 100, // Convertir a centavos
+      currency: 'mxn',
+      metadata: {
+        empresa_id: empresa_id.toString(),
+        usuario_id: usuario_id.toString(),
+        tipo_servicio: concepto || 'Servicio de Instalación'
+      },
+      description: concepto || 'Servicio de Instalación'
+    });
+
+    console.log('✅ Payment Intent creado para servicio:', paymentIntent.id);
+
+    return res.json({
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id
+    });
+
+  } catch (err) {
+    console.error('💥 Error creating payment intent para servicio:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Confirmar pago de servicio y registrar en BD
+app.post('/servicios/confirm-payment', verifyToken, async (req, res) => {
+  try {
+    const { paymentIntentId, datosServicio, datosEquipo } = req.body;
+    const empresa_id = req.user.empresa_id;
+    const usuario_id = req.user.id;
+
+    console.log('📥 Confirmación de pago de servicio:', { paymentIntentId, empresa_id, usuario_id, datosEquipo });
+
+    if (!paymentIntentId) {
+      return res.status(400).json({ error: 'paymentIntentId requerido' });
+    }
+
+    // Recuperar el Payment Intent de Stripe
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    console.log('🔵 Payment Intent recuperado:', {
+      id: paymentIntent.id,
+      status: paymentIntent.status,
+      amount: paymentIntent.amount
+    });
+
+    if (paymentIntent.status !== 'succeeded') {
+      console.log('❌ Pago no exitoso:', paymentIntent.status);
+      return res.status(400).json({ error: 'pago no completado', status: paymentIntent.status });
+    }
+
+    // Registrar en tabla pagos_servicios
+    const monto = paymentIntent.amount / 100;
+    const tipo_servicio = paymentIntent.metadata.tipo_servicio || 'Servicio de Instalación';
+    const ahora = new Date();
+
+    const pagoResult = await query(
+      `INSERT INTO pagos_servicios 
+       (empresa_id, usuario_id, tipo_servicio, monto, moneda, status, metodo_pago, referencia_pago, fecha_pago, datos_adicionales) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       RETURNING *`,
+      [
+        empresa_id,
+        usuario_id,
+        tipo_servicio,
+        monto,
+        'MXN',
+        'completado',
+        'stripe',
+        paymentIntent.id,
+        ahora,
+        JSON.stringify(datosServicio || {})
+      ]
+    );
+
+    console.log('✅ Pago de servicio registrado:', pagoResult.rows[0]);
+
+    // Si hay datos del equipo, registrarlo en la tabla equipos con status "por instalar"
+    let equipoRegistrado = null;
+    if (datosEquipo && datosEquipo.marca) {
+      try {
+        console.log('🔧 Insertando equipo con empresa_id:', empresa_id, 'datosEquipo:', datosEquipo);
+        const equipoResult = await query(
+          `INSERT INTO equipos 
+           (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, 
+            procesador, ram, disco_duro, codigo_registro, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
+           RETURNING *`,
+          [
+            empresa_id,
+            datosEquipo.empleado_id || null,
+            datosEquipo.tipo_equipo || '',
+            datosEquipo.marca || '',
+            datosEquipo.modelo || '',
+            datosEquipo.numero_serie || '',
+            datosEquipo.sistema_operativo || '',
+            datosEquipo.procesador || '',
+            datosEquipo.memoria_ram || '',
+            datosEquipo.disco_duro || '',
+            datosEquipo.codigo_registro || '',
+            'por instalar'
+          ]
+        );
+        equipoRegistrado = equipoResult.rows[0];
+        console.log('✅ Equipo registrado con status "por instalar":', equipoRegistrado);
+      } catch (equipoError) {
+        console.error('Error al registrar equipo:', equipoError);
+        // No fallar el pago si el equipo no se registra, solo loguearlo
+      }
+    }
+
+    return res.json({
+      success: true,
+      mensaje: 'Pago de servicio procesado exitosamente',
+      pago: pagoResult.rows[0],
+      equipo: equipoRegistrado
+    });
+
+  } catch (err) {
+    console.error('procesar pago de servicio error', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+// Historial de pagos de servicios
+app.get('/servicios/pagos/historial', verifyToken, async (req, res) => {
+  try {
+    const empresa_id = req.user.empresa_id;
+    if (!empresa_id) return res.status(400).json({ error: 'no empresa_id' });
+
+    const result = await query(
+      'SELECT * FROM pagos_servicios WHERE empresa_id = $1 ORDER BY fecha_pago DESC',
+      [empresa_id]
+    );
+
+    return res.json({ pagos: result.rows });
+  } catch (err) {
+    console.error('historial pagos servicios error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ============= FIN PAGOS DE SERVICIOS =============
 
 // ============= FIN SISTEMA DE PAGOS =============
 
