@@ -200,7 +200,9 @@ export default function ClientDashboard(){
   const [userRole, setUserRole] = useState('')
 
   // Estados para instalación
-  const [instalacionStep, setInstalacionStep] = useState(1) // 1: config, 2: censo, 3: pago
+  const [tipoInstalacion, setTipoInstalacion] = useState('') // 'propia' o 'asesor'
+  const [instalacionStep, setInstalacionStep] = useState(0) // 0: selección tipo, 1: config, 2: censo, 3: pago
+  const [pagoInstalacionPropiaExitoso, setPagoInstalacionPropiaExitoso] = useState(false)
   const [instalacionConfig, setInstalacionConfig] = useState({
     tipoEquipo: '',
     numBasesDatos: '',
@@ -212,6 +214,9 @@ export default function ClientDashboard(){
     nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' 
   })
   const [mostrarModalEmpleado, setMostrarModalEmpleado] = useState(false)
+
+  // Estados para precios de servicios
+  const [preciosServicios, setPreciosServicios] = useState({})
 
   // Cargar configuración de Stripe al montar
   useEffect(() => {
@@ -232,6 +237,25 @@ export default function ClientDashboard(){
       }
     }
     loadStripeConfig()
+
+    // Cargar precios de servicios
+    async function loadPreciosServicios() {
+      try {
+        const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+        const res = await fetch(`${API}/precios-servicios`)
+        if (res.ok) {
+          const { servicios } = await res.json()
+          const preciosMap = {}
+          servicios.forEach(servicio => {
+            preciosMap[servicio.codigo_servicio] = servicio
+          })
+          setPreciosServicios(preciosMap)
+        }
+      } catch (e) {
+        console.error('Error loading precios:', e)
+      }
+    }
+    loadPreciosServicios()
     
     // Verificar si regresó de un pago
     const urlParams = new URLSearchParams(window.location.search)
@@ -863,7 +887,7 @@ export default function ClientDashboard(){
         <button onClick={()=>setView('perfil')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='perfil'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>👤 Mi Perfil</button>
         <button onClick={()=>setView('empleados')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='empleados'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Empleados</button>
         <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos</button>
-        <button onClick={()=>setView('instalacion')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalacion'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>⬇️ Instalación</button>
+        <button onClick={()=>{setView('instalacion'); setTipoInstalacion(''); setInstalacionStep(0); setPagoInstalacionPropiaExitoso(false);}} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalacion'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>⬇️ Instalación</button>
         <button 
           onClick={()=>membresiaActiva ? setView('census') : setError('⚠️ Necesitas una membresía activa para censar equipos. Por favor, realiza un pago.')} 
           disabled={!membresiaActiva}
@@ -1872,38 +1896,347 @@ export default function ClientDashboard(){
         <div>
           <h2 style={{marginBottom:24}}>⬇️ Solicitud de Instalación</h2>
           
-          {/* Indicador de Pasos */}
-          <div style={{display:'flex',justifyContent:'center',marginBottom:32,gap:16}}>
-            {[
-              {num:1,label:'Configuración'},
-              {num:2,label:'Censo de Equipo'},
-              {num:3,label:'Pago'}
-            ].map((paso)=>(
-              <div key={paso.num} style={{display:'flex',alignItems:'center',gap:8}}>
-                <div style={{
-                  width:40,
-                  height:40,
-                  borderRadius:'50%',
-                  background:instalacionStep>=paso.num?'#3b82f6':'#e2e8f0',
-                  color:instalacionStep>=paso.num?'white':'#94a3b8',
-                  display:'flex',
-                  alignItems:'center',
-                  justifyContent:'center',
-                  fontWeight:700,
-                  fontSize:16
-                }}>
-                  {paso.num}
+          {/* Step 0: Selección de Tipo de Instalación */}
+          {instalacionStep === 0 && (
+            <div style={{maxWidth:800,margin:'0 auto'}}>
+              <h3 style={{marginBottom:16,textAlign:'center',color:'#1e293b'}}>
+                ¿Cómo deseas instalar SEER Tráfico?
+              </h3>
+              <p style={{marginBottom:32,textAlign:'center',color:'#64748b'}}>
+                Selecciona la opción que mejor se adapte a tus necesidades
+              </p>
+              
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
+                {/* Opción: Instalación Propia */}
+                <div 
+                  onClick={()=>{setTipoInstalacion('propia'); setInstalacionStep(1);}}
+                  style={{
+                    border:'2px solid #e2e8f0',
+                    borderRadius:12,
+                    padding:24,
+                    cursor:'pointer',
+                    transition:'all 0.2s',
+                    background:'white',
+                    boxShadow:'0 1px 3px rgba(0,0,0,0.1)'
+                  }}
+                  onMouseEnter={(e)=>{
+                    e.currentTarget.style.borderColor='#3b82f6';
+                    e.currentTarget.style.boxShadow='0 4px 12px rgba(59,130,246,0.2)';
+                  }}
+                  onMouseLeave={(e)=>{
+                    e.currentTarget.style.borderColor='#e2e8f0';
+                    e.currentTarget.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';
+                  }}
+                >
+                  <div style={{fontSize:48,textAlign:'center',marginBottom:16}}>💻</div>
+                  <h4 style={{fontSize:20,fontWeight:700,marginBottom:12,textAlign:'center',color:'#1e293b'}}>
+                    Instalación por mi cuenta
+                  </h4>
+                  <p style={{fontSize:14,color:'#64748b',marginBottom:16,lineHeight:1.6}}>
+                    Descarga los archivos de instalación y realiza la configuración por tu cuenta. 
+                    Incluye guía de instalación completa.
+                  </p>
+                  <div style={{background:'#f1f5f9',padding:12,borderRadius:8,marginBottom:12}}>
+                    <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Precio</div>
+                    <div style={{fontSize:24,fontWeight:700,color:'#3b82f6'}}>
+                      ${preciosServicios.instalacion_propia?.precio || 500} MXN
+                    </div>
+                  </div>
+                  <ul style={{fontSize:13,color:'#64748b',paddingLeft:20,marginBottom:0}}>
+                    <li>Archivos de instalación</li>
+                    <li>Guía paso a paso</li>
+                    <li>Soporte por correo</li>
+                  </ul>
                 </div>
-                <span style={{fontSize:14,fontWeight:600,color:instalacionStep>=paso.num?'#1e293b':'#94a3b8'}}>
-                  {paso.label}
-                </span>
-                {paso.num<3 && <span style={{color:'#cbd5e1',marginLeft:8}}>→</span>}
-              </div>
-            ))}
-          </div>
 
-          {/* Paso 1: Configuración */}
-          {instalacionStep===1 && (
+                {/* Opción: Instalación con Asesor */}
+                <div 
+                  onClick={()=>{setTipoInstalacion('asesor'); setInstalacionStep(1);}}
+                  style={{
+                    border:'2px solid #e2e8f0',
+                    borderRadius:12,
+                    padding:24,
+                    cursor:'pointer',
+                    transition:'all 0.2s',
+                    background:'white',
+                    boxShadow:'0 1px 3px rgba(0,0,0,0.1)'
+                  }}
+                  onMouseEnter={(e)=>{
+                    e.currentTarget.style.borderColor='#10b981';
+                    e.currentTarget.style.boxShadow='0 4px 12px rgba(16,185,129,0.2)';
+                  }}
+                  onMouseLeave={(e)=>{
+                    e.currentTarget.style.borderColor='#e2e8f0';
+                    e.currentTarget.style.boxShadow='0 1px 3px rgba(0,0,0,0.1)';
+                  }}
+                >
+                  <div style={{fontSize:48,textAlign:'center',marginBottom:16}}>👨‍💼</div>
+                  <h4 style={{fontSize:20,fontWeight:700,marginBottom:12,textAlign:'center',color:'#1e293b'}}>
+                    Instalación con Asesor
+                  </h4>
+                  <p style={{fontSize:14,color:'#64748b',marginBottom:16,lineHeight:1.6}}>
+                    Un asesor técnico se encarga de todo el proceso: instalación, configuración y 
+                    soporte personalizado.
+                  </p>
+                  <div style={{background:'#f1f5f9',padding:12,borderRadius:8,marginBottom:12}}>
+                    <div style={{fontSize:12,color:'#64748b',marginBottom:4}}>Precio</div>
+                    <div style={{fontSize:24,fontWeight:700,color:'#10b981'}}>
+                      ${preciosServicios.instalacion_asesor?.precio || 2500} MXN
+                    </div>
+                  </div>
+                  <ul style={{fontSize:13,color:'#64748b',paddingLeft:20,marginBottom:0}}>
+                    <li>Instalación completa</li>
+                    <li>Configuración personalizada</li>
+                    <li>Soporte técnico inicial</li>
+                    <li>Programación flexible</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Pasos siguientes (solo si se seleccionó un tipo) */}
+          {instalacionStep > 0 && (
+            <>
+              {/* Indicador de Pasos */}
+              <div style={{display:'flex',justifyContent:'center',marginBottom:32,gap:16}}>
+                {tipoInstalacion === 'asesor' ? (
+                  // 3 pasos para instalación con asesor
+                  [
+                    {num:1,label:'Configuración'},
+                    {num:2,label:'Censo de Equipo'},
+                    {num:3,label:'Pago'}
+                  ].map((paso)=>(
+                    <div key={paso.num} style={{display:'flex',alignItems:'center',gap:8}}>
+                      <div style={{
+                        width:40,
+                        height:40,
+                        borderRadius:'50%',
+                        background:instalacionStep>=paso.num?'#3b82f6':'#e2e8f0',
+                        color:instalacionStep>=paso.num?'white':'#94a3b8',
+                        display:'flex',
+                        alignItems:'center',
+                        justifyContent:'center',
+                        fontWeight:700,
+                        fontSize:16
+                      }}>
+                        {paso.num}
+                      </div>
+                      <span style={{fontSize:14,fontWeight:600,color:instalacionStep>=paso.num?'#1e293b':'#94a3b8'}}>
+                        {paso.label}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  // 1 paso para instalación propia (solo pago)
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    <div style={{
+                      width:40,
+                      height:40,
+                      borderRadius:'50%',
+                      background:'#3b82f6',
+                      color:'white',
+                      display:'flex',
+                      alignItems:'center',
+                      justifyContent:'center',
+                      fontWeight:700,
+                      fontSize:16
+                    }}>
+                      1
+                    </div>
+                    <span style={{fontSize:14,fontWeight:600,color:'#1e293b'}}>
+                      Pago y Descarga
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          
+          {/* Step 1: Pago y Descarga (para instalación propia) */}
+          {instalacionStep === 1 && tipoInstalacion === 'propia' && (
+            <div style={{maxWidth:700,margin:'0 auto'}}>
+              {!pagoInstalacionPropiaExitoso ? (
+                // Mostrar formulario de pago
+                <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
+                  <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20,textAlign:'center'}}>
+                    Pago del Servicio de Instalación Propia
+                  </h3>
+                  
+                  <div style={{background:'#f8fafc',padding:20,borderRadius:8,marginBottom:24}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                      <span style={{fontSize:16,color:'#64748b'}}>Servicio de Instalación Propia</span>
+                      <span style={{fontSize:24,fontWeight:700,color:'#3b82f6'}}>
+                        ${preciosServicios.instalacion_propia?.precio || 500} MXN
+                      </span>
+                    </div>
+                    <div style={{fontSize:14,color:'#64748b',marginTop:12}}>
+                      {preciosServicios.instalacion_propia?.descripcion || 'Incluye archivos de instalación, guía completa paso a paso, y soporte por correo electrónico.'}
+                    </div>
+                  </div>
+
+                  {stripePromise ? (
+                    <Elements stripe={stripePromise}>
+                      <ServicioPaymentForm
+                        monto={preciosServicios.instalacion_propia?.precio || 500}
+                        datosEquipo={null}
+                        onSuccess={()=>{
+                          setPagoInstalacionPropiaExitoso(true)
+                          setSuccess('✓ Pago realizado exitosamente. Se ha enviado una notificación a clientes@caast.net')
+                        }}
+                        onError={(msg)=>setError(msg)}
+                      />
+                    </Elements>
+                  ) : (
+                    <div style={{padding:20,textAlign:'center',color:'#64748b'}}>
+                      Cargando sistema de pagos...
+                    </div>
+                  )}
+
+                  <div style={{textAlign:'center',marginTop:16}}>
+                    <button 
+                      onClick={()=>{setInstalacionStep(0); setTipoInstalacion(''); setPagoInstalacionPropiaExitoso(false);}}
+                      style={{
+                        padding:'12px 24px',
+                        background:'transparent',
+                        border:'2px solid #e2e8f0',
+                        borderRadius:8,
+                        cursor:'pointer',
+                        fontSize:14,
+                        color:'#64748b',
+                        fontWeight:600
+                      }}
+                    >
+                      ← Volver
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // Mostrar pantalla de descarga después del pago exitoso
+                <div style={{background:'white',borderRadius:12,padding:32,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',textAlign:'center'}}>
+                  <div style={{fontSize:64,marginBottom:16}}>✅</div>
+                  <h3 style={{fontSize:24,fontWeight:700,color:'#10b981',marginBottom:12}}>
+                    ¡Pago exitoso!
+                  </h3>
+                  <p style={{fontSize:16,color:'#64748b',marginBottom:24}}>
+                    Descarga los archivos de instalación y sigue la guía paso a paso
+                  </p>
+
+                  {/* Mensaje de notificación por correo */}
+                  <div style={{background:'#dbeafe',border:'2px solid #3b82f6',padding:16,borderRadius:8,marginBottom:24,textAlign:'left'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                      <span style={{fontSize:20}}>📧</span>
+                      <div style={{fontSize:14,fontWeight:600,color:'#1e40af'}}>
+                        Notificación enviada
+                      </div>
+                    </div>
+                    <div style={{fontSize:14,color:'#1e40af',lineHeight:1.5}}>
+                      Se ha enviado una notificación sobre tu compra a <strong>clientes@caast.net</strong>. 
+                      Nuestro equipo será notificado de tu adquisición del instalador.
+                    </div>
+                  </div>
+
+                  <div style={{display:'grid',gap:16,marginBottom:24}}>
+                    {/* Botón Instalador */}
+                    <div style={{background:'#f8fafc',padding:20,borderRadius:8,textAlign:'left',border:'2px solid #e2e8f0'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:16,fontWeight:600,color:'#1e293b',marginBottom:4}}>
+                            📦 Instalador SEER Tráfico
+                          </div>
+                          <div style={{fontSize:14,color:'#64748b'}}>
+                            Archivo de instalación (simulación)
+                          </div>
+                        </div>
+                        <button 
+                          onClick={()=>{
+                            window.open('/api/descargas/instalador-seer-trafico.txt', '_blank')
+                          }}
+                          style={{
+                            padding:'10px 20px',
+                            background:'#3b82f6',
+                            color:'white',
+                            border:'none',
+                            borderRadius:8,
+                            cursor:'pointer',
+                            fontWeight:600,
+                            fontSize:14
+                          }}
+                        >
+                          Descargar
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Botón Guía */}
+                    <div style={{background:'#f8fafc',padding:20,borderRadius:8,textAlign:'left',border:'2px solid #e2e8f0'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:16,fontWeight:600,color:'#1e293b',marginBottom:4}}>
+                            📄 Guía de Instalación
+                          </div>
+                          <div style={{fontSize:14,color:'#64748b'}}>
+                            Manual completo con instrucciones (simulación)
+                          </div>
+                        </div>
+                        <button 
+                          onClick={()=>{
+                            window.open('/api/descargas/guia-instalacion.txt', '_blank')
+                          }}
+                          style={{
+                            padding:'10px 20px',
+                            background:'#3b82f6',
+                            color:'white',
+                            border:'none',
+                            borderRadius:8,
+                            cursor:'pointer',
+                            fontWeight:600,
+                            fontSize:14
+                          }}
+                        >
+                          Descargar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{background:'#eff6ff',padding:16,borderRadius:8,marginBottom:24,textAlign:'left'}}>
+                    <div style={{fontSize:14,fontWeight:600,color:'#1e40af',marginBottom:8}}>
+                      💡 ¿Necesitas ayuda?
+                    </div>
+                    <div style={{fontSize:14,color:'#1e40af'}}>
+                      Si tienes problemas con la instalación, escríbenos a <strong>soporte@seertrafico.com</strong>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={()=>{
+                      setInstalacionStep(0);
+                      setTipoInstalacion('');
+                      setPagoInstalacionPropiaExitoso(false);
+                      setView('equipos');
+                    }}
+                    style={{
+                      width:'100%',
+                      padding:16,
+                      background:'#10b981',
+                      color:'white',
+                      border:'none',
+                      borderRadius:8,
+                      cursor:'pointer',
+                      fontSize:16,
+                      fontWeight:600
+                    }}
+                  >
+                    Finalizar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Step 1: Configuración (solo para asesor) */}
+          {instalacionStep === 1 && tipoInstalacion === 'asesor' && (
             <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
               <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
                 Configuración Inicial
@@ -1988,45 +2321,66 @@ export default function ClientDashboard(){
                 </label>
               ))}
 
-              <button
-                onClick={()=>{
-                  if(!instalacionConfig.tipoEquipo || !instalacionConfig.numBasesDatos){
-                    setError('Por favor completa todos los campos requeridos')
-                    return
-                  }
-                  // Validar que todos los nombres de BD estén completos
-                  const numBD = parseInt(instalacionConfig.numBasesDatos) || 0
-                  if(numBD > 0){
-                    for(let i = 0; i < numBD; i++){
-                      if(!instalacionConfig.nombresBD[i] || instalacionConfig.nombresBD[i].trim() === ''){
-                        setError(`Ingresa el nombre de la base de datos ${i + 1}`)
-                        return
+              <div style={{display:'flex',gap:12,marginTop:8}}>
+                <button
+                  onClick={()=>{
+                    setInstalacionStep(0);
+                    setTipoInstalacion('');
+                    setInstalacionConfig({tipoEquipo:'',numBasesDatos:'',nombresBD:[]});
+                  }}
+                  style={{
+                    padding:'12px 24px',
+                    background:'transparent',
+                    border:'2px solid #e2e8f0',
+                    borderRadius:8,
+                    cursor:'pointer',
+                    fontSize:14,
+                    color:'#64748b',
+                    fontWeight:600
+                  }}
+                >
+                  ← Volver
+                </button>
+                <button
+                  onClick={()=>{
+                    if(!instalacionConfig.tipoEquipo || !instalacionConfig.numBasesDatos){
+                      setError('Por favor completa todos los campos requeridos')
+                      return
+                    }
+                    // Validar que todos los nombres de BD estén completos
+                    const numBD = parseInt(instalacionConfig.numBasesDatos) || 0
+                    if(numBD > 0){
+                      for(let i = 0; i < numBD; i++){
+                        if(!instalacionConfig.nombresBD[i] || instalacionConfig.nombresBD[i].trim() === ''){
+                          setError(`Ingresa el nombre de la base de datos ${i + 1}`)
+                          return
+                        }
                       }
                     }
-                  }
-                  setInstalacionForm({...instalacionForm,tipo_equipo:instalacionConfig.tipoEquipo})
-                  setInstalacionStep(2)
-                  fetchEmpleados()
-                }}
-                style={{
-                  width:'100%',
-                  padding:16,
-                  background:'#3b82f6',
-                  color:'white',
-                  border:'none',
-                  borderRadius:8,
-                  fontSize:18,
-                  fontWeight:600,
-                  cursor:'pointer'
-                }}
-              >
-                Continuar al Censo →
-              </button>
+                    setInstalacionForm({...instalacionForm,tipo_equipo:instalacionConfig.tipoEquipo})
+                    setInstalacionStep(2)
+                    fetchEmpleados()
+                  }}
+                  style={{
+                    flex:1,
+                    padding:16,
+                    background:'#3b82f6',
+                    color:'white',
+                    border:'none',
+                    borderRadius:8,
+                    fontSize:18,
+                    fontWeight:600,
+                    cursor:'pointer'
+                  }}
+                >
+                  Continuar al Censo →
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Paso 2: Censo del Equipo */}
-          {instalacionStep===2 && (
+          {/* Paso 2: Censo del Equipo (solo para asesor) */}
+          {instalacionStep===2 && tipoInstalacion === 'asesor' && (
             <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
               <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
                 Censo del Equipo
@@ -2341,8 +2695,8 @@ export default function ClientDashboard(){
             </div>
           )}
 
-          {/* Paso 3: Pago */}
-          {instalacionStep===3 && (
+          {/* Paso 3: Pago (solo para asesor) */}
+          {instalacionStep===3 && tipoInstalacion === 'asesor' && (
             <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>
               <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
                 Pago del Servicio de Instalación
@@ -2351,10 +2705,12 @@ export default function ClientDashboard(){
               <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:20,marginBottom:24}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
                   <span style={{fontSize:16,color:'#64748b'}}>Servicio de Instalación</span>
-                  <span style={{fontSize:24,fontWeight:700,color:'#1e293b'}}>$2,500 MXN</span>
+                  <span style={{fontSize:24,fontWeight:700,color:'#1e293b'}}>
+                    ${preciosServicios.instalacion_asesor?.precio || 2500} MXN
+                  </span>
                 </div>
                 <div style={{fontSize:14,color:'#64748b',lineHeight:1.6,marginBottom:12}}>
-                  Incluye instalación, configuración de {instalacionConfig.numBasesDatos} base(s) de datos y soporte técnico inicial.
+                  {preciosServicios.instalacion_asesor?.descripcion || `Incluye instalación, configuración de ${instalacionConfig.numBasesDatos} base(s) de datos y soporte técnico inicial.`}
                 </div>
                 <div style={{background:'white',borderRadius:6,padding:12,fontSize:13,color:'#475569'}}>
                   <div style={{marginBottom:4}}><strong>Equipo:</strong> {instalacionConfig.tipoEquipo}</div>
@@ -2368,7 +2724,7 @@ export default function ClientDashboard(){
               {stripePromise && (
                 <Elements stripe={stripePromise}>
                   <ServicioPaymentForm
-                    monto={2500}
+                    monto={preciosServicios.instalacion_asesor?.precio || 2500}
                     datosEquipo={{
                       marca: instalacionForm.marca,
                       modelo: instalacionForm.modelo,
@@ -2399,23 +2755,46 @@ export default function ClientDashboard(){
                 </Elements>
               )}
 
-              <button
-                onClick={()=>setInstalacionStep(2)}
-                style={{
-                  width:'100%',
-                  padding:16,
-                  background:'#f1f5f9',
-                  color:'#475569',
-                  border:'none',
-                  borderRadius:8,
-                  fontSize:16,
-                  fontWeight:600,
-                  cursor:'pointer',
-                  marginTop:16
-                }}
-              >
-                ← Atrás
-              </button>
+              <div style={{display:'flex',gap:12,marginTop:16}}>
+                <button
+                  onClick={()=>{
+                    setInstalacionStep(0);
+                    setTipoInstalacion('');
+                    setInstalacionConfig({tipoEquipo:'',numBasesDatos:'',nombresBD:[]});
+                    setInstalacionForm({marca:'',modelo:'',no_serie:'',codigo_registro:'',memoria_ram:'',
+                      disco_duro:'',serie_disco_duro:'',sistema_operativo:'',procesador:'',
+                      nombre_usuario_equipo:'',tipo_equipo:'',nombre_equipo:'',empleado_id:''});
+                  }}
+                  style={{
+                    padding:'12px 24px',
+                    background:'transparent',
+                    border:'2px solid #e2e8f0',
+                    borderRadius:8,
+                    cursor:'pointer',
+                    fontSize:14,
+                    color:'#64748b',
+                    fontWeight:600
+                  }}
+                >
+                  ← Volver al Inicio
+                </button>
+                <button
+                  onClick={()=>setInstalacionStep(2)}
+                  style={{
+                    flex:1,
+                    padding:16,
+                    background:'#f1f5f9',
+                    color:'#475569',
+                    border:'none',
+                    borderRadius:8,
+                    fontSize:16,
+                    fontWeight:600,
+                    cursor:'pointer'
+                  }}
+                >
+                  ← Atrás
+                </button>
+              </div>
             </div>
           )}
         </div>

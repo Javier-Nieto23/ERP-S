@@ -260,6 +260,37 @@ async function run() {
     `);
     console.log('Removed UNIQUE constraint from codigo field in codigo_registro table if it existed.');
 
+    // Tabla de Precios de Servicios
+    await query(`CREATE TABLE IF NOT EXISTS precios_servicios (
+      id SERIAL PRIMARY KEY,
+      codigo_servicio VARCHAR(100) UNIQUE NOT NULL,
+      nombre_servicio VARCHAR(250) NOT NULL,
+      descripcion TEXT,
+      precio DECIMAL(10,2) NOT NULL,
+      moneda VARCHAR(10) DEFAULT 'MXN',
+      activo BOOLEAN DEFAULT true,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    console.log('Tabla precios_servicios creada o ya existe.');
+
+    // Insertar precios iniciales de servicios
+    await query(`
+      INSERT INTO precios_servicios (codigo_servicio, nombre_servicio, descripcion, precio, moneda, activo)
+      VALUES 
+        ('plan_anual', 'Plan Anual', 'Membresía anual completa con acceso a todas las funciones del sistema', 2999.00, 'MXN', true),
+        ('instalacion_asesor', 'Instalación con Asesor', 'Servicio completo de instalación con asesor técnico, incluye configuración personalizada y soporte inicial', 2500.00, 'MXN', true),
+        ('instalacion_propia', 'Instalación por mi cuenta', 'Descarga de archivos de instalación, guía paso a paso y soporte por correo electrónico', 500.00, 'MXN', true)
+      ON CONFLICT (codigo_servicio) DO UPDATE SET
+        nombre_servicio = EXCLUDED.nombre_servicio,
+        descripcion = EXCLUDED.descripcion,
+        precio = EXCLUDED.precio,
+        moneda = EXCLUDED.moneda,
+        activo = EXCLUDED.activo,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    console.log('Precios de servicios insertados o actualizados.');
+
     console.log('DB initialization finished.');
   } catch (err) {
     console.error('Init DB error', err);

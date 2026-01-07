@@ -918,6 +918,42 @@ app.post('/admin/programar-instalacion', verifyToken, async (req, res) => {
   }
 });
 
+// Actualizar status de equipo (admin only)
+app.put('/equipos/:id/status', verifyToken, async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'status es requerido' });
+    }
+
+    // Actualizar el status del equipo
+    await query(
+      'UPDATE equipos SET status = $1 WHERE id = $2',
+      [status, id]
+    );
+
+    console.log('✅ Status de equipo actualizado:', {
+      equipo_id: id,
+      nuevo_status: status
+    });
+
+    return res.json({
+      success: true,
+      mensaje: 'Status actualizado exitosamente'
+    });
+
+  } catch (err) {
+    console.error('Error actualizando status:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
 // Obtener todos los equipos (admin only)
 app.get('/admin/equipos', verifyToken, async (req, res) => {
   try {
@@ -1012,10 +1048,84 @@ echo "Verificando Python..."
 
 # Verificar si Python está instalado
 if ! command -v python3 &> /dev/null; then
-    echo "ERROR: Python 3 no está instalado."
-    echo "Por favor instala Python 3 para continuar."
-    read -p "Presiona Enter para salir..."
-    exit 1
+    echo ""
+    echo "Python 3 no está instalado. Intentando instalar automáticamente..."
+    echo ""
+    
+    # Detectar el gestor de paquetes del sistema
+    if command -v apt-get &> /dev/null; then
+        # Debian/Ubuntu
+        echo "Sistema basado en Debian/Ubuntu detectado."
+        echo "Instalando Python 3..."
+        sudo apt-get update && sudo apt-get install -y python3 python3-pip
+        if [ $? -eq 0 ]; then
+            echo "Python 3 instalado exitosamente."
+            echo ""
+        else
+            echo "Error al instalar Python 3 con apt-get."
+        fi
+    elif command -v yum &> /dev/null; then
+        # RedHat/CentOS/Fedora
+        echo "Sistema basado en RedHat/CentOS detectado."
+        echo "Instalando Python 3..."
+        sudo yum install -y python3 python3-pip
+        if [ $? -eq 0 ]; then
+            echo "Python 3 instalado exitosamente."
+            echo ""
+        else
+            echo "Error al instalar Python 3 con yum."
+        fi
+    elif command -v dnf &> /dev/null; then
+        # Fedora moderno
+        echo "Sistema Fedora detectado."
+        echo "Instalando Python 3..."
+        sudo dnf install -y python3 python3-pip
+        if [ $? -eq 0 ]; then
+            echo "Python 3 instalado exitosamente."
+            echo ""
+        else
+            echo "Error al instalar Python 3 con dnf."
+        fi
+    elif command -v pacman &> /dev/null; then
+        # Arch Linux
+        echo "Sistema Arch Linux detectado."
+        echo "Instalando Python 3..."
+        sudo pacman -Sy --noconfirm python python-pip
+        if [ $? -eq 0 ]; then
+            echo "Python 3 instalado exitosamente."
+            echo ""
+        else
+            echo "Error al instalar Python 3 con pacman."
+        fi
+    else
+        echo ""
+        echo "============================================================"
+        echo "   No se pudo instalar Python automáticamente"
+        echo "============================================================"
+        echo ""
+        echo "Por favor instala Python 3 manualmente:"
+        echo ""
+        echo "Debian/Ubuntu:"
+        echo "  sudo apt-get update && sudo apt-get install python3"
+        echo ""
+        echo "Fedora/RedHat:"
+        echo "  sudo dnf install python3"
+        echo ""
+        echo "Arch Linux:"
+        echo "  sudo pacman -S python"
+        echo ""
+        read -p "Presiona Enter para salir..."
+        exit 1
+    fi
+    
+    # Verificar nuevamente si Python se instaló
+    if ! command -v python3 &> /dev/null; then
+        echo ""
+        echo "ERROR: Python 3 no pudo ser instalado."
+        echo "Por favor instala Python 3 manualmente e intenta de nuevo."
+        read -p "Presiona Enter para salir..."
+        exit 1
+    fi
 fi
 
 echo "Python 3 detectado: $(python3 --version)"
@@ -1183,10 +1293,56 @@ echo ====================================================================
 echo.
 echo Verificando Python...
 
+REM Verificar si Python está instalado
 where python >nul 2>nul
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Python no está instalado.
-    echo Por favor instala Python desde https://www.python.org/
+    echo.
+    echo Python no esta instalado. Intentando instalar automaticamente...
+    echo.
+    
+    REM Intentar instalar con winget (Windows 10 1809+)
+    where winget >nul 2>nul
+    if %ERRORLEVEL% EQU 0 (
+        echo Instalando Python con winget...
+        winget install Python.Python.3.11 -e --silent
+        if %ERRORLEVEL% EQU 0 (
+            echo Python instalado exitosamente con winget.
+            echo.
+            echo IMPORTANTE: Cierra esta ventana y vuelve a ejecutar el archivo.
+            pause
+            exit /b 0
+        )
+    )
+    
+    REM Si winget falla, intentar con chocolatey
+    where choco >nul 2>nul
+    if %ERRORLEVEL% EQU 0 (
+        echo Instalando Python con Chocolatey...
+        choco install python -y
+        if %ERRORLEVEL% EQU 0 (
+            echo Python instalado exitosamente con Chocolatey.
+            echo.
+            echo IMPORTANTE: Cierra esta ventana y vuelve a ejecutar el archivo.
+            pause
+            exit /b 0
+        )
+    )
+    
+    REM Si todo falla, mostrar instrucciones manuales
+    echo.
+    echo ============================================================
+    echo   No se pudo instalar Python automaticamente
+    echo ============================================================
+    echo.
+    echo Por favor descarga e instala Python manualmente desde:
+    echo https://www.python.org/downloads/
+    echo.
+    echo Durante la instalacion, MARCA LA CASILLA:
+    echo [ ] Add Python to PATH
+    echo.
+    echo Despues de instalar, cierra esta ventana y vuelve a
+    echo ejecutar el archivo para continuar.
+    echo.
     pause
     exit /b 1
 )
@@ -1387,9 +1543,36 @@ app.patch('/tickets/:id', verifyToken, async (req, res) => {
 
 // ============= SISTEMA DE PAGOS Y SUSCRIPCIONES =============
 
-// Obtener planes disponibles
-app.get('/planes', (req, res) => {
-  return res.json({ planes: PLANES });
+// Obtener planes disponibles (desde base de datos)
+app.get('/planes', async (req, res) => {
+  try {
+    const result = await query(
+      "SELECT * FROM precios_servicios WHERE codigo_servicio = 'plan_anual' AND activo = true"
+    );
+    
+    if (result.rows.length === 0) {
+      // Fallback al plan estático si no existe en BD
+      return res.json({ planes: PLANES });
+    }
+    
+    const planDB = result.rows[0];
+    
+    // Mantener la estructura del objeto PLANES para compatibilidad
+    const planes = {
+      anual: {
+        nombre: planDB.nombre_servicio,
+        precio: parseFloat(planDB.precio),
+        dias: 365,
+        descripcion: planDB.descripcion
+      }
+    };
+    
+    return res.json({ planes });
+  } catch (err) {
+    console.error('Error al obtener planes:', err);
+    // Fallback al plan estático en caso de error
+    return res.json({ planes: PLANES });
+  }
 });
 
 // Obtener clave pública de Stripe
@@ -1868,6 +2051,329 @@ app.get('/servicios/pagos/historial', verifyToken, async (req, res) => {
     return res.status(500).json({ error: 'server error' });
   }
 });
+
+// ============= PRECIOS DE SERVICIOS =============
+
+// Obtener todos los precios de servicios activos
+app.get('/precios-servicios', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT * FROM precios_servicios WHERE activo = true ORDER BY codigo_servicio'
+    );
+    return res.json({ servicios: result.rows });
+  } catch (err) {
+    console.error('Error al obtener precios de servicios:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Obtener precio de un servicio específico
+app.get('/precios-servicios/:codigo', async (req, res) => {
+  try {
+    const { codigo } = req.params;
+    const result = await query(
+      'SELECT * FROM precios_servicios WHERE codigo_servicio = $1 AND activo = true',
+      [codigo]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Servicio no encontrado' });
+    }
+    
+    return res.json({ servicio: result.rows[0] });
+  } catch (err) {
+    console.error('Error al obtener precio del servicio:', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ============= FIN PRECIOS DE SERVICIOS =============
+
+// ============= DESCARGAS DE INSTALACIÓN PROPIA =============
+
+// Endpoint para descargar instalador (simulado con .txt)
+app.get('/api/descargas/instalador-seer-trafico.txt', verifyToken, async (req, res) => {
+  try {
+    const contenido = `===============================================
+INSTALADOR SEER TRÁFICO
+===============================================
+
+Este es un archivo de simulación para pruebas.
+En producción, este sería el instalador real.
+
+INSTRUCCIONES DE INSTALACIÓN:
+
+1. REQUISITOS DEL SISTEMA:
+   - Windows 10/11 o Linux (Ubuntu 20.04+)
+   - 4 GB RAM mínimo (8 GB recomendado)
+   - 10 GB espacio en disco
+   - Conexión a Internet
+
+2. PASOS DE INSTALACIÓN:
+   a) Descomprimir el archivo en una carpeta temporal
+   b) Ejecutar el instalador con privilegios de administrador
+   c) Seguir las instrucciones en pantalla
+   d) Configurar las bases de datos según la guía
+   e) Reiniciar el sistema
+
+3. VERIFICACIÓN:
+   - Acceder a http://localhost:8080
+   - Ingresar credenciales proporcionadas
+   - Verificar conectividad con bases de datos
+
+4. SOPORTE:
+   Email: soporte@seertrafico.com
+   Horario: Lunes a Viernes, 9:00 AM - 6:00 PM
+
+===============================================
+ARCHIVO DE SIMULACIÓN - REEMPLAZAR EN PRODUCCIÓN
+===============================================
+`;
+    
+    res.setHeader('Content-Disposition', 'attachment; filename=instalador-seer-trafico.txt');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(contenido);
+    
+    console.log('✅ Descarga de instalador simulado - Usuario:', req.user.id);
+  } catch (err) {
+    console.error('Error descarga instalador:', err);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
+
+// Endpoint para descargar guía de instalación (simulado con .txt)
+app.get('/api/descargas/guia-instalacion.txt', verifyToken, async (req, res) => {
+  try {
+    const contenido = `===============================================
+GUÍA DE INSTALACIÓN SEER TRÁFICO
+===============================================
+
+TABLA DE CONTENIDOS:
+1. Introducción
+2. Requisitos del Sistema
+3. Instalación Paso a Paso
+4. Configuración Inicial
+5. Resolución de Problemas
+6. Soporte Técnico
+
+===============================================
+1. INTRODUCCIÓN
+===============================================
+
+Bienvenido a la Guía de Instalación de SEER Tráfico.
+Este documento te guiará a través del proceso completo
+de instalación y configuración inicial del sistema.
+
+===============================================
+2. REQUISITOS DEL SISTEMA
+===============================================
+
+HARDWARE MÍNIMO:
+- Procesador: Intel Core i3 o equivalente
+- Memoria RAM: 4 GB
+- Espacio en Disco: 10 GB
+- Resolución: 1366x768 o superior
+
+SOFTWARE REQUERIDO:
+- Sistema Operativo: Windows 10/11 o Linux
+- .NET Framework 4.8 o superior (Windows)
+- Python 3.8+ (para herramientas de censo)
+- Navegador web moderno
+
+===============================================
+3. INSTALACIÓN PASO A PASO
+===============================================
+
+PASO 1: PREPARACIÓN
+a) Descargar todos los archivos necesarios
+b) Verificar permisos de administrador
+c) Cerrar programas antivirus temporalmente
+
+PASO 2: EJECUCIÓN DEL INSTALADOR
+a) Hacer doble clic en el instalador
+b) Aceptar términos y condiciones
+c) Seleccionar carpeta de instalación
+d) Esperar finalización (aprox. 5-10 minutos)
+
+PASO 3: CONFIGURACIÓN POST-INSTALACIÓN
+a) Configurar conexiones a bases de datos
+b) Establecer credenciales de acceso
+c) Configurar puertos de red
+d) Realizar prueba de conectividad
+
+===============================================
+4. CONFIGURACIÓN INICIAL
+===============================================
+
+CONFIGURACIÓN DE BASES DE DATOS:
+- Servidor: localhost o IP remota
+- Puerto: 5432 (PostgreSQL) o según BD
+- Usuario: crear usuario específico
+- Password: establecer contraseña segura
+
+CONFIGURACIÓN DE RED:
+- Puerto HTTP: 8080 (predeterminado)
+- Puerto HTTPS: 8443 (si SSL habilitado)
+- Firewall: permitir puertos mencionados
+
+===============================================
+5. RESOLUCIÓN DE PROBLEMAS
+===============================================
+
+PROBLEMA: El instalador no inicia
+SOLUCIÓN: Verificar permisos de administrador
+
+PROBLEMA: Error de conexión a BD
+SOLUCIÓN: Verificar credenciales y firewall
+
+PROBLEMA: Puerto en uso
+SOLUCIÓN: Cambiar puerto en configuración
+
+===============================================
+6. SOPORTE TÉCNICO
+===============================================
+
+Email: soporte@seertrafico.com
+Teléfono: +52 (55) 1234-5678
+Horario: Lunes a Viernes, 9:00 AM - 6:00 PM
+Portal: https://soporte.seertrafico.com
+
+===============================================
+DOCUMENTO DE SIMULACIÓN - REEMPLAZAR EN PRODUCCIÓN
+===============================================
+`;
+    
+    res.setHeader('Content-Disposition', 'attachment; filename=guia-instalacion.txt');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(contenido);
+    
+    console.log('✅ Descarga de guía simulada - Usuario:', req.user.id);
+  } catch (err) {
+    console.error('Error descarga guía:', err);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
+
+// Los siguientes endpoints se mantienen por compatibilidad pero ya no se usan en instalación propia
+// Endpoint para descargar instalador Windows (legacy)
+app.get('/api/descargas/seer-trafico-windows.exe', verifyToken, async (req, res) => {
+  try {
+    // Por ahora, enviamos un archivo de texto como placeholder
+    // En producción, aquí enviarías el .exe real
+    const contenido = `# Instalador SEER Tráfico para Windows
+# Este es un placeholder. Reemplaza con el archivo .exe real
+
+echo "Instalando SEER Tráfico..."
+echo "Por favor, sigue las instrucciones en la guía de instalación"
+`;
+    
+    res.setHeader('Content-Disposition', 'attachment; filename=seer-trafico-installer.bat');
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.send(contenido);
+  } catch (err) {
+    console.error('Error descarga Windows:', err);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
+
+// Endpoint para descargar instalador Linux
+app.get('/api/descargas/seer-trafico-linux.sh', verifyToken, async (req, res) => {
+  try {
+    const contenido = `#!/bin/bash
+# Instalador SEER Tráfico para Linux
+# Este es un script de ejemplo. Reemplaza con el instalador real
+
+echo "========================================"
+echo "Instalador SEER Tráfico para Linux"
+echo "========================================"
+echo ""
+
+# Detectar distribución
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    OS=$NAME
+    VER=$VERSION_ID
+fi
+
+echo "Sistema detectado: $OS $VER"
+echo ""
+
+# Verificar permisos de superusuario
+if [ "$EUID" -ne 0 ]; then 
+    echo "Por favor ejecuta este script con privilegios de superusuario (sudo)"
+    exit 1
+fi
+
+echo "Instalando dependencias..."
+# Aquí iría la lógica real de instalación
+
+echo ""
+echo "✓ Instalación completada"
+echo "Por favor, consulta la guía de instalación para configurar SEER Tráfico"
+`;
+    
+    res.setHeader('Content-Disposition', 'attachment; filename=seer-trafico-installer.sh');
+    res.setHeader('Content-Type', 'application/x-sh');
+    res.send(contenido);
+  } catch (err) {
+    console.error('Error descarga Linux:', err);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
+
+// Endpoint para descargar guía de instalación PDF
+app.get('/api/descargas/guia-instalacion-seer.pdf', verifyToken, async (req, res) => {
+  try {
+    // Por ahora, enviamos un archivo de texto como placeholder
+    // En producción, aquí enviarías el PDF real
+    const contenido = `GUÍA DE INSTALACIÓN SEER TRÁFICO
+
+===========================================
+CONTENIDO:
+===========================================
+
+1. REQUISITOS DEL SISTEMA
+   - Windows 10/11 o Linux (Ubuntu 20.04+, Debian 11+, CentOS 8+)
+   - 4 GB RAM mínimo (8 GB recomendado)
+   - 10 GB espacio en disco
+   - Conexión a Internet
+
+2. INSTALACIÓN EN WINDOWS
+   a) Ejecutar seer-trafico-installer.bat como Administrador
+   b) Seguir las instrucciones en pantalla
+   c) Reiniciar el sistema después de la instalación
+
+3. INSTALACIÓN EN LINUX
+   a) Dar permisos de ejecución: chmod +x seer-trafico-installer.sh
+   b) Ejecutar con sudo: sudo ./seer-trafico-installer.sh
+   c) Reiniciar el servicio después de la instalación
+
+4. CONFIGURACIÓN INICIAL
+   - Acceder a http://localhost:8080
+   - Ingresar credenciales proporcionadas
+   - Configurar bases de datos
+   - Realizar prueba de conexión
+
+5. SOPORTE TÉCNICO
+   Email: soporte@seertrafico.com
+   Horario: Lunes a Viernes, 9:00 AM - 6:00 PM
+
+===========================================
+Este es un documento placeholder.
+Reemplazar con el PDF real en producción.
+===========================================
+`;
+    
+    res.setHeader('Content-Disposition', 'attachment; filename=guia-instalacion-seer.txt');
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(contenido);
+  } catch (err) {
+    console.error('Error descarga guía:', err);
+    res.status(500).json({ error: 'Error al descargar archivo' });
+  }
+});
+
+// ============= FIN DESCARGAS =============
 
 // ============= FIN PAGOS DE SERVICIOS =============
 

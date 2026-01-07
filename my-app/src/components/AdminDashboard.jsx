@@ -31,6 +31,7 @@ export default function AdminDashboard(){
   const [instalacionesProgramadas, setInstalacionesProgramadas] = useState([])
   const [equipoAProgramarInstalacion, setEquipoAProgramarInstalacion] = useState(null)
   const [fechaInstalacion, setFechaInstalacion] = useState('')
+  const [equipoEnInstalacion, setEquipoEnInstalacion] = useState(null)
 
   // Función para obtener días del mes en formato calendario
   function getDiasDelMes(fecha) {
@@ -313,7 +314,7 @@ export default function AdminDashboard(){
       <div style={{width:200,background:'#1e293b',padding:16,color:'white'}}>
         <h3 style={{margin:'0 0 16px 0',fontSize:16}}>Menú</h3>
         <button onClick={()=>setView('home')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='home'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Inicio</button>
-        <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos Registrados</button>
+        <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Solicitudes de Censo</button>
         <button onClick={()=>setView('instalaciones')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalaciones'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>🔧 Instalación</button>
       </div>
       <div style={{flex:1,padding:24,overflow:'auto'}}>
@@ -598,37 +599,7 @@ export default function AdminDashboard(){
                 </div>
               </div>
               
-              {/* Empleados */}
-              <div style={{
-                background:'white',
-                borderRadius:12,
-                padding:20,
-                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
-                display:'flex',
-                alignItems:'center',
-                gap:16
-              }}>
-                <div style={{
-                  width:48,
-                  height:48,
-                  borderRadius:12,
-                  background:'#ccfbf1',
-                  display:'flex',
-                  alignItems:'center',
-                  justifyContent:'center',
-                  fontSize:24
-                }}>
-                  👥
-                </div>
-                <div>
-                  <div style={{fontSize:32,fontWeight:700,color:'#1e293b'}}>
-                    {estadisticas.empleados}
-                  </div>
-                  <div style={{fontSize:14,color:'#64748b'}}>
-                    Empleados
-                  </div>
-                </div>
-              </div>
+            
               
               {/* Completados */}
               <div style={{
@@ -867,7 +838,26 @@ export default function AdminDashboard(){
                               </td>
                               <td style={{padding:12,textAlign:'center'}}>
                                 <button
-                                  onClick={() => setView('instalaciones')}
+                                  onClick={async () => {
+                                    // Buscar el equipo completo para abrirlo en modal de instalación
+                                    const token = localStorage.getItem('token')
+                                    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                                    try {
+                                      const res = await fetch(`${API}/admin/equipos`, {
+                                        headers: { Authorization: `Bearer ${token}` }
+                                      })
+                                      if (res.ok) {
+                                        const data = await res.json()
+                                        const equipoCompleto = data.equipos.find(e => e.id === instalacion.equipo_id)
+                                        if (equipoCompleto) {
+                                          setEquipoEnInstalacion(equipoCompleto)
+                                          setView('instalaciones')
+                                        }
+                                      }
+                                    } catch(e) {
+                                      console.error('Error:', e)
+                                    }
+                                  }}
                                   style={{
                                     padding:'8px 16px',
                                     background:'#f59e0b',
@@ -966,7 +956,26 @@ export default function AdminDashboard(){
                               </td>
                               <td style={{padding:12,textAlign:'center'}}>
                                 <button
-                                  onClick={() => setView('equipos')}
+                                  onClick={async () => {
+                                    // Buscar el equipo completo y abrir modal de censo
+                                    const token = localStorage.getItem('token')
+                                    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                                    try {
+                                      const res = await fetch(`${API}/admin/equipos`, {
+                                        headers: { Authorization: `Bearer ${token}` }
+                                      })
+                                      if (res.ok) {
+                                        const data = await res.json()
+                                        const equipoCompleto = data.equipos.find(e => e.id === censo.equipo_id)
+                                        if (equipoCompleto) {
+                                          setEquipoEnCenso(equipoCompleto)
+                                          setView('equipos')
+                                        }
+                                      }
+                                    } catch(e) {
+                                      console.error('Error:', e)
+                                    }
+                                  }}
                                   style={{
                                     padding:'8px 16px',
                                     background:'#10b981',
@@ -2092,6 +2101,151 @@ export default function AdminDashboard(){
                 }}
               >
                 Programar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Modal para Realizar Instalación */}
+      {equipoEnInstalacion && (
+        <div style={{
+          position:'fixed',
+          top:0,
+          left:0,
+          right:0,
+          bottom:0,
+          background:'rgba(0,0,0,0.5)',
+          display:'flex',
+          alignItems:'center',
+          justifyContent:'center',
+          zIndex:1000,
+          padding:20,
+          overflow:'auto'
+        }}>
+          <div style={{
+            background:'white',
+            borderRadius:12,
+            padding:32,
+            width:'90%',
+            maxWidth:600,
+            boxShadow:'0 20px 25px -5px rgba(0,0,0,0.1)',
+            maxHeight:'90vh',
+            overflow:'auto'
+          }}>
+            <h3 style={{fontSize:20,fontWeight:700,color:'#1e293b',marginBottom:24}}>
+              ✓ Completar Instalación
+            </h3>
+            
+            {/* Información del Equipo */}
+            <div style={{padding:20,background:'#f8fafc',borderRadius:8,border:'2px solid #e2e8f0',marginBottom:20}}>
+              <h4 style={{margin:'0 0 16px 0',fontSize:16,color:'#1e293b',fontWeight:600}}>
+                Detalles del Equipo
+              </h4>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,fontSize:14}}>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Empresa</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.nombre_empresa || 'N/A'}</div>
+                </div>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Tipo</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.tipo_equipo || 'N/A'}</div>
+                </div>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Marca</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.marca || 'N/A'}</div>
+                </div>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Modelo</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.modelo || 'N/A'}</div>
+                </div>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Serie</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.numero_serie || 'N/A'}</div>
+                </div>
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Empleado</div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.nombre_empleado || 'Sin asignar'}</div>
+                </div>
+              </div>
+            </div>
+
+            {error && <div style={{padding:12,background:'#fee2e2',color:'#991b1b',borderRadius:8,marginBottom:16}}>{error}</div>}
+            {success && <div style={{padding:12,background:'#d1fae5',color:'#065f46',borderRadius:8,marginBottom:16}}>{success}</div>}
+            
+            <div style={{marginBottom:20,padding:16,background:'#fef3c7',borderRadius:8,border:'1px solid #fbbf24'}}>
+              <p style={{margin:0,fontSize:14,color:'#92400e',lineHeight:1.5}}>
+                ℹ️ Al completar la instalación, el equipo pasará a estado <strong>"Activo"</strong> y estará disponible para el cliente.
+              </p>
+            </div>
+            
+            <div style={{display:'flex',gap:12}}>
+              <button
+                onClick={() => {
+                  setEquipoEnInstalacion(null)
+                  setError('')
+                  setSuccess('')
+                }}
+                style={{
+                  flex:1,
+                  padding:12,
+                  background:'#f1f5f9',
+                  color:'#475569',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:14,
+                  fontWeight:600,
+                  cursor:'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  setError('')
+                  setSuccess('')
+                  try {
+                    const token = localStorage.getItem('token')
+                    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                    
+                    // Actualizar status del equipo a 'activo'
+                    const res = await fetch(`${API}/equipos/${equipoEnInstalacion.id}/status`, {
+                      method: 'PUT',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`
+                      },
+                      body: JSON.stringify({ status: 'activo' })
+                    })
+                    
+                    if (!res.ok) {
+                      const data = await res.json()
+                      return setError(data.error || 'Error al completar instalación')
+                    }
+                    
+                    setSuccess('✓ Instalación completada exitosamente')
+                    setTimeout(() => {
+                      setEquipoEnInstalacion(null)
+                      fetchEquiposPorInstalar()
+                      fetchInstalacionesProgramadas()
+                    }, 1500)
+                  } catch(e) {
+                    setError('Error de conexión')
+                  }
+                }}
+                style={{
+                  flex:1,
+                  padding:12,
+                  background:'#10b981',
+                  color:'white',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:14,
+                  fontWeight:600,
+                  cursor:'pointer'
+                }}
+              >
+                ✓ Completar Instalación
               </button>
             </div>
           </div>
