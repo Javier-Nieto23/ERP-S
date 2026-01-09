@@ -327,8 +327,8 @@ app.post('/equipment-requests', verifyToken, verificarMembresia, upload.single('
     // Guardar directamente en la tabla equipos (solo con empleado_id, sin empresa_id)
     // El status inicial será 'pendiente' cuando se realiza un censo
     const insert = await query(
-      'INSERT INTO equipos (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
-      [id_equipo, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '', 'pendiente']
+      'INSERT INTO equipos (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, procesador, ram, disco_duro, codigo_registro, nombre_equipo, status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
+      [id_equipo, empleado_id ? parseInt(empleado_id) : null, tipo_equipo || '', marca, modelo, no_serie, sistema_operativo || '', procesador || '', memoria_ram || '', disco_duro || '', codigo_registro || '', nombre_equipo || '', 'pendiente']
     );
 
     console.log('Equipo guardado en tabla equipos con status pendiente:', insert.rows[0]);
@@ -966,6 +966,7 @@ app.get('/admin/equipos', verifyToken, async (req, res) => {
         eq.tipo_equipo,
         eq.marca,
         eq.modelo,
+        eq.nombre_equipo,
         eq.numero_serie,
         eq.sistema_operativo,
         eq.procesador,
@@ -977,10 +978,12 @@ app.get('/admin/equipos', verifyToken, async (req, res) => {
         emp.nombre_empleado,
         e.nombre_empresa,
         e.id as empresa_id,
+        cr.licencia,
         (SELECT dia_agendado FROM agenda WHERE equipo_id = eq.id ORDER BY id DESC LIMIT 1) as dia_agendado
       FROM equipos eq
       INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
       LEFT JOIN empleados emp ON eq.empleado_id = emp.id
+      LEFT JOIN codigo_registro cr ON eq.codigo_registro = cr.codigo
       ORDER BY eq.id DESC
     `);
 

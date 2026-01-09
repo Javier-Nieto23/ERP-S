@@ -25,6 +25,9 @@ export default function AdminDashboard(){
   })
   const [servicioTab, setServicioTab] = useState('instalaciones')
   const [empresaFiltro, setEmpresaFiltro] = useState('todas')
+  const [empresasExpandidas, setEmpresasExpandidas] = useState({})
+  const [censoTab, setCensoTab] = useState('disponibles')
+  const [sidebarExpanded, setSidebarExpanded] = useState(false)
   
   // Estados para instalaciones
   const [equiposPorInstalar, setEquiposPorInstalar] = useState([])
@@ -310,14 +313,282 @@ export default function AdminDashboard(){
   }, [view])
 
   return (
-    <div style={{display:'flex',height:'calc(100vh - 80px)'}}>
-      <div style={{width:200,background:'#1e293b',padding:16,color:'white'}}>
-        <h3 style={{margin:'0 0 16px 0',fontSize:16}}>Menú</h3>
-        <button onClick={()=>setView('home')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='home'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Inicio</button>
-        <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Solicitudes de Censo</button>
-        <button onClick={()=>setView('instalaciones')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalaciones'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>🔧 Instalación</button>
+    <div style={{
+      display:'flex',
+      height:'100vh',
+      width:'100vw',
+      margin:0,
+      padding:0,
+      background:'#f5f5f5',
+      fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      position:'fixed',
+      top:0,
+      left:0,
+      right:0,
+      bottom:0
+    }}>
+      {/* Barra lateral con animación de expansión */}
+      <div 
+        style={{
+          width: sidebarExpanded ? 280 : 80,
+          background: '#e8e8e8',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: sidebarExpanded ? 'stretch' : 'center',
+          padding: '20px 0',
+          gap: 8,
+          transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          position: 'relative',
+          overflow: 'hidden',
+          height: '100vh'
+        }}
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+      >
+        {/* Logo */}
+        <div style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+          padding: sidebarExpanded ? '0 20px' : '0',
+          marginBottom: 32,
+          gap: 12,
+          transition: 'all 0.3s ease'
+        }}>
+          <div style={{
+            width: 48,
+            height: 48,
+            minWidth: 48,
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 24
+          }}>📊</div>
+          {sidebarExpanded && (
+            <div style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: '#1e293b',
+              whiteSpace: 'nowrap',
+              opacity: sidebarExpanded ? 1 : 0,
+              transition: 'opacity 0.3s ease 0.1s'
+            }}>Portal RDP</div>
+          )}
+        </div>
+
+        {/* Barra de búsqueda - solo cuando está expandido */}
+        {sidebarExpanded && (
+          <div style={{
+            margin: '0 16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '8px 12px',
+            gap: 8,
+            opacity: sidebarExpanded ? 1 : 0,
+            transition: 'opacity 0.3s ease 0.15s'
+          }}>
+            <span style={{fontSize: 16, color: '#94a3b8'}}>🔍</span>
+            <input 
+              type="text" 
+              placeholder="Search"
+              style={{
+                border: 'none',
+                outline: 'none',
+                background: 'transparent',
+                width: '100%',
+                fontSize: 14,
+                color: '#64748b'
+              }}
+            />
+          </div>
+        )}
+
+        {/* Iconos/Menú de navegación */}
+        <nav style={{flex: 1, width: '100%', padding: sidebarExpanded ? '0 12px' : '0'}}>
+          <button 
+            onClick={() => setView('home')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'home' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'home' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'home' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'home' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'home') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'home') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Dashboard' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>🏠</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Dashboard</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setView('equipos')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'equipos' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'equipos' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'equipos' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'equipos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'equipos') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'equipos') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Solicitudes de Censo' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>📦</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Solicitudes de Censo</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setView('instalaciones')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'instalaciones' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'instalaciones' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'instalaciones' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'instalaciones' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'instalaciones') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'instalaciones') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Instalaciones' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>🔧</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Instalación</span>
+            )}
+          </button>
+        </nav>
+
+        {/* Logout */}
+        <div style={{
+          width: '100%',
+          padding: sidebarExpanded ? '12px' : '0',
+          borderTop: '1px solid #d1d5db'
+        }}>
+          <button
+            onClick={() => {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              window.location.reload();
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0' : '0 auto',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: '#ef4444',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 500,
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            title={!sidebarExpanded ? 'Cerrar sesión' : ''}
+          >
+            <span style={{fontSize: 18, minWidth: 18}}>🚪</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Cerrar sesión</span>
+            )}
+          </button>
+        </div>
       </div>
-      <div style={{flex:1,padding:24,overflow:'auto'}}>
+
+      {/* Contenido principal */}
+      <div style={{flex:1,padding:32,overflow:'auto',background:'white'}}>
         {view==='home' && (
           <div>
             <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8}}>
@@ -802,6 +1073,7 @@ export default function AdminDashboard(){
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Equipo</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Código de Registro</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Fecha Programada</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Estado</th>
                             <th style={{padding:12,textAlign:'center',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
@@ -814,6 +1086,7 @@ export default function AdminDashboard(){
                               <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{instalacion.marca}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b'}}>{instalacion.modelo}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b',fontFamily:'monospace'}}>{instalacion.numero_serie}</td>
+                              <td style={{padding:12,fontSize:12,color:'#64748b'}}>{instalacion.codigo_registro || 'N/A'}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b'}}>
                                 {new Date(instalacion.dia_agendado).toLocaleString('es-MX', {
                                   year: 'numeric',
@@ -920,6 +1193,7 @@ export default function AdminDashboard(){
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Equipo</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Código de Registro</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Fecha Programada</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Estado</th>
                             <th style={{padding:12,textAlign:'center',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
@@ -932,6 +1206,7 @@ export default function AdminDashboard(){
                               <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{censo.marca}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b'}}>{censo.modelo}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b',fontFamily:'monospace'}}>{censo.numero_serie}</td>
+                              <td style={{padding:12,fontSize:12,color:'#64748b'}}>{censo.codigo_registro || 'N/A'}</td>
                               <td style={{padding:12,fontSize:14,color:'#64748b'}}>
                                 {new Date(censo.dia_agendado).toLocaleString('es-MX', {
                                   year: 'numeric',
@@ -1034,15 +1309,87 @@ export default function AdminDashboard(){
         {view==='equipos' && (
           <div>
             <h2>📦 Solicitudes de Censo </h2>
+            <p style={{color:'#64748b',marginBottom:24}}>Solicitudes de censo de equipos pendientes y asignadas</p>
             {error && <div style={{padding:12,background:'#fee2e2',color:'#991b1b',borderRadius:8,marginBottom:16}}>{error}</div>}
             {success && <div style={{padding:12,background:'#d1fae5',color:'#065f46',borderRadius:8,marginBottom:16}}>{success}</div>}
             
-            {equipos.length === 0 ? (
-              <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
-                <p style={{color:'#64748b',margin:0}}>No hay equipos registrados</p>
-              </div>
-            ) : (
-              <>
+            {/* Pestañas de Solicitudes de Censo */}
+            <div style={{
+              display:'flex',
+              gap:0,
+              borderBottom:'1px solid #e2e8f0',
+              marginBottom:24,
+              background:'white'
+            }}>
+              <button
+                onClick={() => setCensoTab('porProgramar')}
+                style={{
+                  padding:'12px 20px',
+                  background: 'transparent',
+                  border:'none',
+                  borderBottom: censoTab === 'porProgramar' ? '3px solid #3b82f6' : '3px solid transparent',
+                  color: censoTab === 'porProgramar' ? '#1e293b' : '#64748b',
+                  fontWeight: censoTab === 'porProgramar' ? 600 : 500,
+                  fontSize:14,
+                  cursor:'pointer',
+                  transition:'all 0.2s',
+                  display:'flex',
+                  alignItems:'center',
+                  gap:8
+                }}
+              >
+                <span style={{fontSize:18}}>📋</span> Por Programar
+              </button>
+              <button
+                onClick={() => setCensoTab('programados')}
+                style={{
+                  padding:'12px 20px',
+                  background: 'transparent',
+                  border:'none',
+                  borderBottom: censoTab === 'programados' ? '3px solid #3b82f6' : '3px solid transparent',
+                  color: censoTab === 'programados' ? '#1e293b' : '#64748b',
+                  fontWeight: censoTab === 'programados' ? 600 : 500,
+                  fontSize:14,
+                  cursor:'pointer',
+                  transition:'all 0.2s',
+                  display:'flex',
+                  alignItems:'center',
+                  gap:8
+                }}
+              >
+                <span style={{fontSize:18}}>📅</span> Programados
+              </button>
+              <button
+                onClick={() => setCensoTab('historial')}
+                style={{
+                  padding:'12px 20px',
+                  background: 'transparent',
+                  border:'none',
+                  borderBottom: censoTab === 'historial' ? '3px solid #3b82f6' : '3px solid transparent',
+                  color: censoTab === 'historial' ? '#1e293b' : '#64748b',
+                  fontWeight: censoTab === 'historial' ? 600 : 500,
+                  fontSize:14,
+                  cursor:'pointer',
+                  transition:'all 0.2s',
+                  display:'flex',
+                  alignItems:'center',
+                  gap:8
+                }}
+              >
+                <span style={{fontSize:18}}>🕐</span> Historial
+              </button>
+            </div>
+
+            {/* Contenido basado en la pestaña activa */}
+            
+            {/* Por Programar - Equipos Pendientes */}
+            {censoTab === 'porProgramar' && (
+              equipos.length === 0 ? (
+                <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                  <p style={{color:'#64748b',margin:0}}>No hay equipos registrados</p>
+                </div>
+              ) : (
+                <>
                 {/* Equipos Pendientes */}
                 {equipos.filter(eq => eq.status === 'pendiente').length > 0 && (
                   <div style={{marginBottom:32}}>
@@ -1059,6 +1406,7 @@ export default function AdminDashboard(){
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Código de Instalacion</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Status</th>
                             <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
@@ -1072,6 +1420,7 @@ export default function AdminDashboard(){
                               <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
                               <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
                               <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.numero_serie || 'N/A'}</td>
+                              <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.codigo_registro || 'N/A'}</td>
                               <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
                                 {eq.nombre_empleado || 'Sin asignar'}
                               </td>
@@ -1118,163 +1467,261 @@ export default function AdminDashboard(){
                   </div>
                 )}
 
-                {/* Equipos Programados */}
-                {equipos.filter(eq => eq.status === 'programado').length > 0 && (
-                  <div style={{marginBottom:32}}>
-                    <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{display:'inline-block',width:12,height:12,borderRadius:'50%',background:'#3b82f6'}}></span>
-                      Equipos Programados ({equipos.filter(eq => eq.status === 'programado').length})
-                    </h3>
-                    <div style={{overflowX:'auto'}}>
-                      <table style={{width:'100%',borderCollapse:'collapse',background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
-                        <thead>
-                          <tr style={{background:'#f1f5f9'}}>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empresa</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Tipo</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Fecha Programada</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Status</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {equipos.filter(eq => eq.status === 'programado').map((eq) => (
-                            <tr key={eq.id} style={{borderBottom:'1px solid #f1f5f9'}}>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.nombre_empresa || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.numero_serie || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
-                                {eq.nombre_empleado || 'Sin asignar'}
-                              </td>
-                              <td style={{padding:12,fontSize:13,color:'#1e293b'}}>
-                                {eq.dia_agendado ? new Date(eq.dia_agendado).toLocaleString('es-MX', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                }) : 'N/A'}
-                              </td>
-                              <td style={{padding:12,fontSize:14}}>
-                                <span style={{
-                                  padding: '4px 12px',
-                                  borderRadius: 12,
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  background: '#dbeafe',
-                                  color: '#1e40af'
-                                }}>
-                                  📅 Programado
-                                </span>
-                              </td>
-                              <td style={{padding:12}}>
-                                <button
-                                  onClick={() => setEquipoEnCenso(eq)}
-                                  style={{
-                                    padding: '6px 12px',
-                                    background: '#10b981',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: 6,
-                                    fontSize: 12,
-                                    fontWeight: 600,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                  }}
-                                  onMouseOver={(e) => e.target.style.background = '#059669'}
-                                  onMouseOut={(e) => e.target.style.background = '#10b981'}
-                                >
-                                  ✓ Realizar Censo
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* Equipos Activos y otros status */}
-                {equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada').length > 0 && (
-                  <div>
-                    <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{display:'inline-block',width:12,height:12,borderRadius:'50%',background:'#10b981'}}></span>
-                      Otros Equipos ({equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada').length})
-                    </h3>
-                    <div style={{overflowX:'auto'}}>
-                      <table style={{width:'100%',borderCollapse:'collapse',background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
-                        <thead>
-                          <tr style={{background:'#f1f5f9'}}>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empresa</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Tipo</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Status</th>
-                            <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada').map((eq) => (
-                            <tr key={eq.id} style={{borderBottom:'1px solid #f1f5f9'}}>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.nombre_empresa || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.numero_serie || 'N/A'}</td>
-                              <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
-                                {eq.nombre_empleado || 'Sin asignar'}
-                              </td>
-                              <td style={{padding:12,fontSize:14}}>
-                                <span style={{
-                                  padding: '4px 12px',
-                                  borderRadius: 12,
-                                  fontSize: 12,
-                                  fontWeight: 600,
-                                  background: eq.status === 'activo' ? '#d1fae5' : '#fee2e2',
-                                  color: eq.status === 'activo' ? '#065f46' : '#991b1b'
-                                }}>
-                                  {eq.status === 'activo' ? '✓ Activo' : eq.status || 'N/A'}
-                                </span>
-                              </td>
-                              <td style={{padding:12}}>
-                                {eq.status === 'registrado' && (
-                                  <button
-                                    onClick={() => handleVisualizarEquipo(eq)}
-                                    title="Ver información"
-                                    style={{
-                                      padding: '6px 12px',
-                                      background: '#8b5cf6',
-                                      color: 'white',
-                                      border: 'none',
-                                      borderRadius: 6,
-                                      fontSize: 12,
-                                      fontWeight: 600,
-                                      cursor: 'pointer',
-                                      transition: 'all 0.2s'
-                                    }}
-                                    onMouseOver={(e) => e.target.style.background = '#7c3aed'}
-                                    onMouseOut={(e) => e.target.style.background = '#8b5cf6'}
-                                  >
-                                    👁️ Ver
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
               </>
+            ))}
+
+            {/* Programados - Equipos Programados */}
+            {censoTab === 'programados' && (
+              equipos.filter(eq => eq.status === 'programado').length === 0 ? (
+                <div style={{
+                  padding:40,
+                  textAlign:'center',
+                  background:'#f8fafc',
+                  borderRadius:8,
+                  border:'1px solid #e2e8f0'
+                }}>
+                  <div style={{fontSize:48,marginBottom:16}}>📅</div>
+                  <p style={{
+                    fontSize:16,
+                    fontWeight:600,
+                    color:'#1e293b',
+                    margin:'0 0 8px 0'
+                  }}>
+                    No hay censos programados
+                  </p>
+                </div>
+              ) : (
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
+                    <thead>
+                      <tr style={{background:'#f1f5f9'}}>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empresa</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Tipo</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Código de Registro</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Fecha Programada</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Status</th>
+                        <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {equipos.filter(eq => eq.status === 'programado').map((eq) => (
+                        <tr key={eq.id} style={{borderBottom:'1px solid #f1f5f9'}}>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.nombre_empresa || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.tipo_equipo || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.numero_serie || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.codigo_registro || 'N/A'}</td>
+                          <td style={{padding:12,fontSize:14,color:'#1e293b'}}>
+                            {eq.nombre_empleado || 'Sin asignar'}
+                          </td>
+                          <td style={{padding:12,fontSize:13,color:'#1e293b'}}>
+                            {eq.dia_agendado ? new Date(eq.dia_agendado).toLocaleString('es-MX', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : 'N/A'}
+                          </td>
+                          <td style={{padding:12,fontSize:14}}>
+                            <span style={{
+                              padding: '4px 12px',
+                              borderRadius: 12,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              background: '#dbeafe',
+                              color: '#1e40af'
+                            }}>
+                              📅 Programado
+                            </span>
+                          </td>
+                          <td style={{padding:12}}>
+                            <button
+                              onClick={() => setEquipoEnCenso(eq)}
+                              style={{
+                                padding: '6px 12px',
+                                background: '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                              }}
+                              onMouseOver={(e) => e.target.style.background = '#059669'}
+                              onMouseOut={(e) => e.target.style.background = '#10b981'}
+                            >
+                              ✓ Realizar Censo
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+
+            {/* Historial - Equipos Registrados con formato expandible */}
+            {censoTab === 'historial' && (
+              equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada').length > 0 ? (
+                <div>
+                  <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{display:'inline-block',width:12,height:12,borderRadius:'50%',background:'#10b981'}}></span>
+                    Registro de equipos ({equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada').length})
+                  </h3>
+                  <div style={{overflowX:'auto'}}>
+                    <div style={{background:'white',boxShadow:'0 1px 3px rgba(0,0,0,0.1)',borderRadius:8,overflow:'hidden'}}>
+                      {(() => {
+                        // Agrupar equipos por empresa
+                        const equiposFiltrados = equipos.filter(eq => eq.status !== 'pendiente' && eq.status !== 'programado' && eq.status !== 'por instalar' && eq.status !== 'instalacion programada')
+                        const empresasMap = {}
+                        equiposFiltrados.forEach(eq => {
+                          const nombreEmpresa = eq.nombre_empresa || 'Sin Empresa'
+                          if (!empresasMap[nombreEmpresa]) {
+                            empresasMap[nombreEmpresa] = []
+                          }
+                            empresasMap[nombreEmpresa].push(eq)
+                          })
+                          
+                          return Object.keys(empresasMap).map((nombreEmpresa, idx) => (
+                            <div key={idx} style={{borderBottom: idx < Object.keys(empresasMap).length - 1 ? '1px solid #e2e8f0' : 'none'}}>
+                              {/* Fila de empresa */}
+                              <div 
+                                onClick={() => {
+                                  setEmpresasExpandidas(prev => ({
+                                    ...prev,
+                                    [nombreEmpresa]: !prev[nombreEmpresa]
+                                  }))
+                                }}
+                                style={{
+                                  padding: 16,
+                                  background: '#f8fafc',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 12,
+                                  transition: 'background 0.2s',
+                                  ':hover': { background: '#f1f5f9' }
+                                }}
+                                onMouseOver={(e) => e.currentTarget.style.background = '#f1f5f9'}
+                                onMouseOut={(e) => e.currentTarget.style.background = '#f8fafc'}
+                              >
+                                <span style={{
+                                  fontSize: 16,
+                                  transition: 'transform 0.2s',
+                                  transform: empresasExpandidas[nombreEmpresa] ? 'rotate(180deg)' : 'rotate(0deg)',
+                                  display: 'inline-block'
+                                }}>
+                                  ▼
+                                </span>
+                                <span style={{fontSize: 15, fontWeight: 600, color: '#1e293b'}}>
+                                  {nombreEmpresa}
+                                </span>
+                                <span style={{
+                                  marginLeft: 'auto',
+                                  fontSize: 13,
+                                  color: '#64748b',
+                                  background: '#e2e8f0',
+                                  padding: '4px 10px',
+                                  borderRadius: 12,
+                                  fontWeight: 600
+                                }}>
+                                  {empresasMap[nombreEmpresa].length} {empresasMap[nombreEmpresa].length === 1 ? 'equipo' : 'equipos'}
+                                </span>
+                              </div>
+                              
+                              {/* Equipos de la empresa (colapsable) */}
+                              {empresasExpandidas[nombreEmpresa] && (
+                                <div style={{background: 'white'}}>
+                                  {empresasMap[nombreEmpresa].map((eq, eqIdx) => (
+                                    <div 
+                                      key={eq.id} 
+                                      style={{
+                                        padding: '12px 16px 12px 52px',
+                                        borderBottom: eqIdx < empresasMap[nombreEmpresa].length - 1 ? '1px solid #f1f5f9' : 'none',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 16,
+                                        background: 'white'
+                                      }}
+                                    >
+                                      <div style={{flex: 1}}>
+                                        <div style={{fontSize: 14, fontWeight: 600, color: '#1e293b', marginBottom: 4}}>
+                                          {eq.nombre_equipo || `${eq.marca || 'N/A'} ${eq.modelo || 'N/A'}`}
+                                        </div>
+                                        <div style={{fontSize: 13, color: '#64748b'}}>
+                                          Empleado: {eq.nombre_empleado || 'Sin asignar'}
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <span style={{
+                                          padding: '4px 12px',
+                                          borderRadius: 12,
+                                          fontSize: 12,
+                                          fontWeight: 600,
+                                          background: eq.status === 'activo' ? '#d1fae5' : eq.status === 'registrado' ? '#dbeafe' : '#fee2e2',
+                                          color: eq.status === 'activo' ? '#065f46' : eq.status === 'registrado' ? '#1e40af' : '#991b1b'
+                                        }}>
+                                          {eq.status === 'activo' ? '✓ Activo' : eq.status === 'registrado' ? '📋 Registrado' : eq.status || 'N/A'}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <button
+                                          onClick={() => handleVisualizarEquipo(eq)}
+                                          title="Ver información"
+                                          style={{
+                                            padding: '6px 12px',
+                                            background: '#8b5cf6',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: 6,
+                                            fontSize: 12,
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s'
+                                          }}
+                                          onMouseOver={(e) => e.target.style.background = '#7c3aed'}
+                                          onMouseOut={(e) => e.target.style.background = '#8b5cf6'}
+                                        >
+                                          👁️ Ver
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding:40,
+                    textAlign:'center',
+                    background:'#f8fafc',
+                    borderRadius:8,
+                    border:'1px solid #e2e8f0'
+                  }}>
+                    <div style={{fontSize:48,marginBottom:16}}>🕐</div>
+                    <p style={{
+                      fontSize:16,
+                      fontWeight:600,
+                      color:'#1e293b',
+                      margin:'0 0 8px 0'
+                    }}>
+                      No hay equipos en el historial
+                    </p>
+                  </div>
+                )
             )}
           </div>
         )}
@@ -1881,6 +2328,7 @@ export default function AdminDashboard(){
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Marca</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Modelo</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Serie</th>
+                      <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Código de Registro</th>
                       <th style={{padding:12,textAlign:'left',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Empleado</th>
                       <th style={{padding:12,textAlign:'center',fontSize:14,fontWeight:600,color:'#475569',borderBottom:'2px solid #e2e8f0'}}>Acciones</th>
                     </tr>
@@ -1893,6 +2341,7 @@ export default function AdminDashboard(){
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.marca || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.modelo || 'N/A'}</td>
                         <td style={{padding:12,fontSize:12,color:'#64748b',fontFamily:'monospace'}}>{eq.numero_serie || 'N/A'}</td>
+                        <td style={{padding:12,fontSize:12,color:'#64748b'}}>{eq.codigo_registro || 'N/A'}</td>
                         <td style={{padding:12,fontSize:14,color:'#1e293b'}}>{eq.nombre_empleado || 'Sin asignar'}</td>
                         <td style={{padding:12,textAlign:'center'}}>
                           <button
@@ -2167,6 +2616,11 @@ export default function AdminDashboard(){
                   <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Empleado</div>
                   <div style={{color:'#1e293b'}}>{equipoEnInstalacion.nombre_empleado || 'Sin asignar'}</div>
                 </div>
+              
+                <div>
+                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Código de </div>
+                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.codigo_registro || 'Sin asignar'}</div>
+                </div>
               </div>
             </div>
 
@@ -2175,7 +2629,7 @@ export default function AdminDashboard(){
             
             <div style={{marginBottom:20,padding:16,background:'#fef3c7',borderRadius:8,border:'1px solid #fbbf24'}}>
               <p style={{margin:0,fontSize:14,color:'#92400e',lineHeight:1.5}}>
-                ℹ️ Al completar la instalación, el equipo pasará a estado <strong>"Activo"</strong> y estará disponible para el cliente.
+                ℹ️ Favor de revisar la informacion del equipo al realizar la instalación, una vez finalizado el servicio el equipo pasará a la lista de equipos a censar para realizar la activacion.
               </p>
             </div>
             
