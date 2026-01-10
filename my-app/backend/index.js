@@ -91,6 +91,40 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+// Configurar multer para archivos de tickets
+const storageTickets = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = path.join(__dirname, 'uploads', 'tickets');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, 'ticket-' + uniqueSuffix + '-' + sanitizedName);
+  }
+});
+const uploadTickets = multer({ 
+  storage: storageTickets,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB límite
+  fileFilter: function (req, file, cb) {
+    // Aceptar imágenes y archivos .el, .err, .log, .txt
+    const allowedTypes = /jpeg|jpg|png|gif|bmp|el|err|log|txt/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype) || 
+                     file.mimetype === 'application/octet-stream' ||
+                     file.mimetype === 'text/plain';
+    
+    if (mimetype && extname) {
+      return cb(null, true);
+    } else {
+      cb(new Error('Tipo de archivo no permitido. Solo imágenes y archivos .el, .err, .log, .txt'));
+    }
+  }
+});
+
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 
 function verifyToken(req, res, next) {
@@ -596,7 +630,8 @@ app.get('/equipos', verifyToken, async (req, res) => {
         eq.status,
         emp.id_empleado,
         emp.nombre_empleado,
-        e.nombre_empresa
+        e.nombre_empresa,
+        (SELECT dia_agendado FROM agenda WHERE equipo_id = eq.id ORDER BY id DESC LIMIT 1) as dia_agendado
       FROM equipos eq
       INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
       LEFT JOIN empleados emp ON eq.empleado_id = emp.id
@@ -1167,7 +1202,7 @@ def get_windows_info():
         info['nombre_equipo'] = platform.node()
         info['nombre_usuario_equipo'] = os.getlogin()
         chassis = subprocess.check_output("wmic systemenclosure get chassistypes", shell=True).decode().strip().split('\\n')[1].strip()
-        tipo = "Desktop" if chassis in ["3", "4", "5", "6", "7"] else "Laptop"
+        tipo = "Escritorio" if chassis in ["3", "4", "5", "6", "7"] else "Laptop"
         info['tipo_equipo'] = tipo
         info['codigo_registro'] = serial
     except Exception as e:
@@ -1214,11 +1249,11 @@ def get_linux_info():
         info['nombre_equipo'] = platform.node()
         info['nombre_usuario_equipo'] = os.getlogin()
         try:
-            chassis = subprocess.check_output("sudo dmidecode -s chassis-type 2>/dev/null || echo Desktop", shell=True).decode().strip()
-            tipo = "Laptop" if "Laptop" in chassis or "Notebook" in chassis else "Desktop"
+            chassis = subprocess.check_output("sudo dmidecode -s chassis-type 2>/dev/null || echo Escritorio", shell=True).decode().strip()
+            tipo = "Laptop" if "Laptop" in chassis or "Notebook" in chassis else "Escritorio"
             info['tipo_equipo'] = tipo
         except:
-            info['tipo_equipo'] = "Desktop"
+            info['tipo_equipo'] = "Escritorio"
         info['codigo_registro'] = info['no_serie']
     except Exception as e:
         print(f"Error obteniendo info de Linux: {e}")
@@ -1383,7 +1418,7 @@ def get_windows_info():
         info['nombre_equipo'] = platform.node()
         info['nombre_usuario_equipo'] = os.getlogin()
         chassis = subprocess.check_output('wmic systemenclosure get chassistypes', shell=True).decode().strip().split('\\n')[1].strip()
-        tipo = 'Desktop' if chassis in ['3', '4', '5', '6', '7'] else 'Laptop'
+        tipo = 'Escritorio' if chassis in ['3', '4', '5', '6', '7'] else 'Laptop'
         info['tipo_equipo'] = tipo
     except Exception as e:
         print(f'Error obteniendo info: {e}')
@@ -1486,17 +1521,39 @@ app.get('/download/census-tool-linux', verifyToken, (req, res) => {
 // ==================== TICKETS ENDPOINTS ====================
 
 // Create ticket (cliente only)
-app.post('/tickets', verifyToken, verificarMembresia, async (req, res) => {
+app.post('/tickets', verifyToken, verificarMembresia, uploadTickets.array('archivos', 5), async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
     const { asunto, descripcion, prioridad } = req.body || {};
     if (!asunto || !descripcion) return res.status(400).json({ error: 'missing required fields' });
 
+    // Insertar el ticket
     const insert = await query(
       'INSERT INTO tickets (cliente_id, empresa_id, asunto, descripcion, prioridad, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [req.user.id, req.user.empresa_id, asunto, descripcion, prioridad || 'media', 'abierto']
     );
-    return res.status(201).json({ ticket: insert.rows[0] });
+    
+    const ticket = insert.rows[0];
+
+    // Si hay archivos adjuntos, guardarlos en la base de datos
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        await query(
+          'INSERT INTO ticket_archivos (ticket_id, nombre_archivo, nombre_original, ruta_archivo, tipo_archivo, tamano_archivo, subido_por) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+          [
+            ticket.id,
+            file.filename,
+            file.originalname,
+            file.path,
+            file.mimetype,
+            file.size,
+            req.user.id
+          ]
+        );
+      }
+    }
+
+    return res.status(201).json({ ticket: ticket });
   } catch (err) {
     console.error('create ticket error', err);
     return res.status(500).json({ error: 'server error' });
@@ -1544,6 +1601,86 @@ app.patch('/tickets/:id', verifyToken, async (req, res) => {
   }
 });
 
+// Obtener archivos de un ticket
+app.get('/tickets/:id/archivos', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Verificar acceso: admin o el cliente que creó el ticket
+    if (req.user.rol === 'cliente') {
+      const ticketCheck = await query('SELECT cliente_id FROM tickets WHERE id = $1', [id]);
+      if (ticketCheck.rows.length === 0) return res.status(404).json({ error: 'ticket not found' });
+      if (ticketCheck.rows[0].cliente_id !== req.user.id) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    } else if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const result = await query(
+      `SELECT ta.*, ue.nombre_usuario, ue.email 
+       FROM ticket_archivos ta 
+       LEFT JOIN usuarios_empresas ue ON ta.subido_por = ue.id 
+       WHERE ta.ticket_id = $1 
+       ORDER BY ta.fecha_subida DESC`,
+      [id]
+    );
+    
+    return res.json({ archivos: result.rows });
+  } catch (err) {
+    console.error('get ticket files error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Descargar un archivo de ticket
+app.get('/tickets/archivos/:archivoId/descargar', verifyToken, async (req, res) => {
+  try {
+    const { archivoId } = req.params;
+    
+    // Obtener información del archivo
+    const result = await query(
+      `SELECT ta.*, t.cliente_id 
+       FROM ticket_archivos ta 
+       JOIN tickets t ON ta.ticket_id = t.id 
+       WHERE ta.id = $1`,
+      [archivoId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'file not found' });
+    }
+    
+    const archivo = result.rows[0];
+    
+    // Verificar acceso
+    if (req.user.rol === 'cliente' && archivo.cliente_id !== req.user.id) {
+      return res.status(403).json({ error: 'forbidden' });
+    } else if (req.user.rol !== 'admin' && req.user.rol !== 'cliente') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    
+    // Verificar que el archivo existe
+    if (!fs.existsSync(archivo.ruta_archivo)) {
+      return res.status(404).json({ error: 'file not found on disk' });
+    }
+    
+    // Enviar el archivo
+    res.download(archivo.ruta_archivo, archivo.nombre_original, (err) => {
+      if (err) {
+        console.error('download error', err);
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'download failed' });
+        }
+      }
+    });
+  } catch (err) {
+    console.error('download file error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Update ticket status (admin only)
 // ============= SISTEMA DE PAGOS Y SUSCRIPCIONES =============
 
 // Obtener planes disponibles (desde base de datos)
@@ -1761,7 +1898,8 @@ app.get('/suscripcion/estado', verifyToken, async (req, res) => {
         estado: estado,
         fecha_inicio: pago.fecha_pago,
         fecha_expiracion: pago.fecha_expiracion,
-        dias_restantes: dias_restantes
+        dias_restantes: dias_restantes,
+        dias_agregados: pago.dias_agregados
       }
     });
   } catch (err) {

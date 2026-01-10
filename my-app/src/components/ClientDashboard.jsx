@@ -170,6 +170,55 @@ export default function ClientDashboard(){
   // Estados para tickets
   const [tickets, setTickets] = useState([])
   const [ticketForm, setTicketForm] = useState({ titulo: '', descripcion: '', prioridad: 'media' })
+  const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('')
+  const [subcategoriaSeleccionada, setSubcategoriaSeleccionada] = useState('')
+  const [descripcionTicket, setDescripcionTicket] = useState('')
+  const [archivosTicket, setArchivosTicket] = useState([])
+  const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
+
+  // Definición de categorías y subcategorías de tickets
+  const categoriasTickets = {
+    'Error Conexión a base de datos': {
+      emoji: '🔌',
+      color: '#ef4444',
+      subcategorias: [
+        'Error al conectar a la base de datos',
+        'Desconexión con la base de datos',
+        'Desconexión al abrir SEER Tráfico'
+      ]
+    },
+    'Error Ejecutando SEER Tráfico': {
+      emoji: '⚠️',
+      color: '#f59e0b',
+      subcategorias: [
+        'Ejecutable SEER Tráfico no abre',
+        'Error con el importador de datos',
+        'Error con el XML',
+        'Botón Entrar deshabilitado',
+        'Error SQL Native Client 12'
+      ]
+    },
+    'Error Portal web': {
+      emoji: '🌐',
+      color: '#3b82f6',
+      subcategorias: [
+        'Error al conectar con la base de datos',
+        'Error tiempo de espera',
+        'Error con la versión',
+        'Configuración función .log'
+      ]
+    },
+    'Error en Actualización de bases de datos': {
+      emoji: '🔄',
+      color: '#8b5cf6',
+      subcategorias: [
+        'Error al ejecutar base de datos modelo',
+        'Error al ejecutar actualizador',
+        'Error con la Fecha de versión',
+        'No se reconoce base de datos modelo'
+      ]
+    }
+  }
 
   // Estados para el flujo de censo
   const [tipoEquipoSeleccionado, setTipoEquipoSeleccionado] = useState('') // 'laptop' o 'escritorio'
@@ -198,6 +247,9 @@ export default function ClientDashboard(){
   const [equipoAProgramar, setEquipoAProgramar] = useState(null)
   const [fechaCenso, setFechaCenso] = useState('')
   const [userRole, setUserRole] = useState('')
+  const [sidebarExpanded, setSidebarExpanded] = useState(false)
+  const [mesActual, setMesActual] = useState(new Date())
+  const [diaSeleccionado, setDiaSeleccionado] = useState(null)
 
   // Estados para instalación
   const [tipoInstalacion, setTipoInstalacion] = useState('') // 'propia' o 'asesor'
@@ -217,6 +269,70 @@ export default function ClientDashboard(){
 
   // Estados para precios de servicios
   const [preciosServicios, setPreciosServicios] = useState({})
+
+  // Función para obtener días del mes en formato calendario
+  function getDiasDelMes(fecha) {
+    const year = fecha.getFullYear()
+    const month = fecha.getMonth()
+    const primerDia = new Date(year, month, 1)
+    const ultimoDia = new Date(year, month + 1, 0)
+    const diasEnMes = ultimoDia.getDate()
+    const primerDiaSemana = primerDia.getDay()
+    const ajuste = primerDiaSemana === 0 ? 6 : primerDiaSemana - 1
+    
+    const dias = []
+    
+    // Días del mes anterior
+    const ultimoDiaMesAnterior = new Date(year, month, 0).getDate()
+    for (let i = ajuste - 1; i >= 0; i--) {
+      dias.push({
+        dia: ultimoDiaMesAnterior - i,
+        esMesActual: false,
+        fecha: new Date(year, month - 1, ultimoDiaMesAnterior - i)
+      })
+    }
+    
+    // Días del mes actual
+    for (let i = 1; i <= diasEnMes; i++) {
+      dias.push({
+        dia: i,
+        esMesActual: true,
+        fecha: new Date(year, month, i)
+      })
+    }
+    
+    // Días del siguiente mes para completar la grilla
+    const diasRestantes = 42 - dias.length
+    for (let i = 1; i <= diasRestantes; i++) {
+      dias.push({
+        dia: i,
+        esMesActual: false,
+        fecha: new Date(year, month + 1, i)
+      })
+    }
+    
+    return dias
+  }
+
+  // Función para obtener equipos de un día específico
+  function getEquiposDelDia(diaObj) {
+    if (!diaObj.esMesActual) return []
+    
+    const equiposFiltrados = equipos.filter(eq => {
+      if (!eq.dia_agendado) return false
+      const fechaAgendada = new Date(eq.dia_agendado)
+      return fechaAgendada.getDate() === diaObj.dia &&
+             fechaAgendada.getMonth() === mesActual.getMonth() &&
+             fechaAgendada.getFullYear() === mesActual.getFullYear()
+    })
+    
+    // Debug
+    if (equiposFiltrados.length > 0) {
+      console.log('📅 Equipos del día', diaObj.dia, ':', equiposFiltrados)
+    }
+    
+    return equiposFiltrados
+  }
 
   // Cargar configuración de Stripe al montar
   useEffect(() => {
@@ -294,6 +410,23 @@ export default function ClientDashboard(){
           setMembresiaActiva(esActiva)
           console.log('🔍 Verificación inicial de membresía:', esActiva ? 'ACTIVA' : 'INACTIVA')
         }
+        
+        // Cargar equipos para el calendario
+        const resEquipos = await fetch(`${API}/equipos`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if(resEquipos.ok) {
+          const dataEquipos = await resEquipos.json()
+          setEquipos(dataEquipos.equipos || [])
+          console.log('📅 Equipos cargados para calendario:', dataEquipos.equipos?.length || 0)
+          console.log('📅 Equipos completos:', dataEquipos.equipos)
+          // Verificar cuántos tienen dia_agendado
+          const conFecha = dataEquipos.equipos?.filter(eq => eq.dia_agendado) || []
+          console.log('📅 Equipos con dia_agendado:', conFecha.length)
+          if (conFecha.length > 0) {
+            console.log('📅 Primer equipo con fecha:', conFecha[0])
+          }
+        }
       } catch(e) {
         console.error('Error verificando membresía inicial:', e)
       }
@@ -342,7 +475,7 @@ export default function ClientDashboard(){
             })
             
             setIsPolling(false)
-            setSuccess('✓ ¡Censo recibido! Los datos del equipo se han cargado en el formulario.')
+            setSuccess('Datos cargados exitosamente.\n\nRevisa y completa el formulario.')
             
             // Detener polling
             if(pollingIntervalRef.current) clearInterval(pollingIntervalRef.current)
@@ -388,7 +521,7 @@ export default function ClientDashboard(){
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       
-      setSuccess('✓ Herramienta para Linux descargada.\n\nPara ejecutarlo:\n1. Abre una terminal en la carpeta de descargas\n2. Ejecuta: chmod +x censo_equipos.sh\n3. Ejecuta: ./censo_equipos.sh\n\nSe generará un archivo .txt. Súbelo usando el botón de carga más abajo.')
+      setSuccess('Herramienta descargada exitosamente.\n\nEjecuta en terminal:\nchmod +x censo_equipos.sh\n./censo_equipos.sh\n\nSubir el archivo .txt generado.')
       
     }catch(e){
       console.error('Error en handleDownloadAutoTool:', e)
@@ -426,7 +559,7 @@ export default function ClientDashboard(){
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       
-      setSuccess('✓ Herramienta para Windows descargada.\n\nPara ejecutarlo:\n1. Ve a la carpeta de descargas\n2. Haz doble clic en censo_equipos.bat\n\nSe generará un archivo .txt. Súbelo usando el botón de carga más abajo.')
+      setSuccess('Herramienta descargada exitosamente.\n\nEjecuta: censo_equipos.bat\n\nSubir el archivo .txt generado.')
       
     }catch(e){
       console.error('Error en handleDownloadWindowsTool:', e)
@@ -598,7 +731,7 @@ export default function ClientDashboard(){
       const data = await res.json()
       if (!res.ok) return setError(data.error || 'Error al solicitar censo')
       
-      setSuccess('✓ Solicitud enviada exitosamente. Puedes censar otro equipo.')
+      setSuccess('Censo registrado exitosamente.\n\nPuedes registrar otro equipo.')
       
       // Limpiar formulario y estados
       setForm({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' })
@@ -861,136 +994,563 @@ export default function ClientDashboard(){
     }
   }
 
+  // Función para cargar archivos de un ticket
+  async function fetchArchivosTicket(ticketId) {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/${ticketId}/archivos`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setArchivosTicketsPorId(prev => ({
+          ...prev,
+          [ticketId]: data.archivos || []
+        }))
+      }
+    } catch (e) {
+      console.error('Error al cargar archivos del ticket:', e)
+    }
+  }
+
+  // Función para descargar archivo
+  async function descargarArchivo(archivoId, nombreArchivo) {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/archivos/${archivoId}/descargar`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = nombreArchivo
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+      } else {
+        setError('Error al descargar el archivo')
+      }
+    } catch (e) {
+      setError('Error de conexión al descargar archivo')
+    }
+  }
+
   async function handleTicketSubmit(e){
-    e.preventDefault(); setError(''); setSuccess('')
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    
+    if(!categoriaSeleccionada || !subcategoriaSeleccionada || !descripcionTicket){
+      setError('Por favor completa todos los campos requeridos')
+      return
+    }
+    
     try{
       const token = localStorage.getItem('token')
       const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      
+      // Crear FormData para incluir archivos
+      const formData = new FormData()
+      formData.append('asunto', `${categoriaSeleccionada} - ${subcategoriaSeleccionada}`)
+      formData.append('descripcion', descripcionTicket)
+      formData.append('prioridad', 'alta')
+      formData.append('categoria', categoriaSeleccionada)
+      formData.append('subcategoria', subcategoriaSeleccionada)
+      
+      // Agregar archivos si hay
+      if(archivosTicket.length > 0){
+        archivosTicket.forEach(archivo => {
+          formData.append('archivos', archivo)
+        })
+      }
+      
       const res = await fetch(`${API}/tickets`, {
-        method:'POST', 
-        headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
-        body: JSON.stringify(ticketForm)
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
       })
+      
       const data = await res.json()
-      if (!res.ok) return setError(data.error || 'Error al crear ticket')
+      if(!res.ok) return setError(data.error || 'Error al crear ticket')
+      
       setSuccess('✓ Ticket creado exitosamente')
-      setTicketForm({ asunto: '', descripcion: '', prioridad: 'media' })
+      setCategoriaSeleccionada('')
+      setSubcategoriaSeleccionada('')
+      setDescripcionTicket('')
+      setArchivosTicket([])
       await fetchTickets()
-    }catch(e){ setError('Error de conexión') }
+    }catch(e){
+      setError('Error de conexión')
+    }
   }
 
   return (
-    <div style={{display:'flex',height:'calc(100vh - 80px)'}}>
-      <div style={{width:200,background:'#1e293b',padding:16,color:'white',display:'flex',flexDirection:'column'}}>
-        <h3 style={{margin:'0 0 16px 0',fontSize:16}}>Menú</h3>
-        <button onClick={()=>setView('home')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='home'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Inicio</button>
-        <button onClick={()=>setView('perfil')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='perfil'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>👤 Mi Perfil</button>
-        <button onClick={()=>setView('empleados')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='empleados'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>Empleados</button>
-        <button onClick={()=>setView('equipos')} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='equipos'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>📦 Equipos</button>
-        <button onClick={()=>{setView('instalacion'); setTipoInstalacion(''); setInstalacionStep(0); setPagoInstalacionPropiaExitoso(false);}} style={{display:'block',width:'100%',padding:8,marginBottom:8,background:view==='instalacion'?'#334155':'transparent',border:'none',color:'white',textAlign:'left',cursor:'pointer',borderRadius:4}}>⬇️ Instalación</button>
-        <button 
-          onClick={()=>membresiaActiva ? setView('census') : setError('⚠️ Necesitas una membresía activa para censar equipos. Por favor, realiza un pago.')} 
-          disabled={!membresiaActiva}
-          style={{
-            display:'block',
-            width:'100%',
-            padding:8,
-            marginBottom:8,
-            background:view==='census'?'#334155':'transparent',
-            border:'none',
-            color:membresiaActiva?'white':'#94a3b8',
-            textAlign:'left',
-            cursor:membresiaActiva?'pointer':'not-allowed',
-            borderRadius:4,
-            opacity:membresiaActiva?1:0.6
-          }}
-        >
-          {membresiaActiva ? '📋 Censar Equipo' : '🔒 Censar Equipo (Bloqueado)'}
-        </button>
-        <button 
-          onClick={()=>membresiaActiva ? setView('tickets') : setError('⚠️ Necesitas una membresía activa para crear tickets. Por favor, realiza un pago.')} 
-          disabled={!membresiaActiva}
-          style={{
-            display:'block',
-            width:'100%',
-            padding:8,
-            marginBottom:8,
-            background:view==='tickets'?'#334155':'transparent',
-            border:'none',
-            color:membresiaActiva?'white':'#94a3b8',
-            textAlign:'left',
-            cursor:membresiaActiva?'pointer':'not-allowed',
-            borderRadius:4,
-            opacity:membresiaActiva?1:0.6
-          }}
-        >
-          {membresiaActiva ? '🎫 Tickets' : '🔒 Tickets (Bloqueado)'}
-        </button>
-        
-        {/* Botón de cerrar sesión al final */}
-        <button 
-          onClick={()=>{
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = '/';
-          }} 
-          style={{
-            display:'block',
-            width:'100%',
-            padding:8,
-            marginTop:'auto',
-            background:'#ef4444',
-            border:'none',
-            color:'white',
-            textAlign:'left',
-            cursor:'pointer',
-            borderRadius:4,
-            fontWeight:600
-          }}
-        >
-          🚪 Cerrar Sesión
-        </button>
-      </div>
-      <div style={{flex:1,padding:24,overflow:'auto'}}>
-        {/* Mensajes de éxito y error globales */}
-        {success && (
+    <div style={{
+      display:'flex',
+      height:'100vh',
+      width:'100vw',
+      margin:0,
+      padding:0,
+      background:'white',
+      fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      position:'fixed',
+      top:0,
+      left:0,
+      right:0,
+      bottom:0,
+      overflow:'hidden'
+    }}>
+      {/* Barra lateral con animación de expansión */}
+      <div 
+        style={{
+          width: sidebarExpanded ? 280 : 80,
+          background: '#e8e8e8',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: sidebarExpanded ? 'stretch' : 'center',
+          padding: '20px 0',
+          gap: 8,
+          transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          position: 'relative',
+          overflow: 'hidden',
+          height: '100vh',
+          flexShrink: 0
+        }}
+        onMouseEnter={() => setSidebarExpanded(true)}
+        onMouseLeave={() => setSidebarExpanded(false)}
+      >
+        {/* Logo */}
+        <div style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+          padding: sidebarExpanded ? '0 20px' : '0',
+          marginBottom: 32,
+          gap: 12,
+          transition: 'all 0.3s ease'
+        }}>
           <div style={{
-            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-            color: 'white',
-            padding: '16px 24px',
+            width: 48,
+            height: 48,
+            minWidth: 48,
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             borderRadius: 12,
-            marginBottom: 24,
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
-            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-            animation: 'slideDown 0.3s ease-out'
+            justifyContent: 'center',
+            fontSize: 24
+          }}>📊</div>
+          {sidebarExpanded && (
+            <div style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: '#1e293b',
+              whiteSpace: 'nowrap',
+              opacity: sidebarExpanded ? 1 : 0,
+              transition: 'opacity 0.3s ease 0.1s'
+            }}>Portal Cliente</div>
+          )}
+        </div>
+
+        {/* Barra de búsqueda - solo cuando está expandido */}
+        {sidebarExpanded && (
+          <div style={{
+            margin: '0 16px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+            padding: '8px 12px',
+            gap: 8,
+            opacity: sidebarExpanded ? 1 : 0,
+            transition: 'opacity 0.3s ease 0.15s'
           }}>
-            <span style={{ fontSize: 24 }}>✓</span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>¡Éxito!</div>
-              <div style={{ fontSize: 14, opacity: 0.95 }}>{success}</div>
-            </div>
-            <button
-              onClick={() => setSuccess('')}
+            <span style={{fontSize: 16, color: '#94a3b8'}}>🔍</span>
+            <input 
+              type="text" 
+              placeholder="Buscar"
               style={{
-                background: 'rgba(255,255,255,0.2)',
                 border: 'none',
-                color: 'white',
-                borderRadius: '50%',
-                width: 32,
-                height: 32,
-                cursor: 'pointer',
-                fontSize: 18,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
+                outline: 'none',
+                background: 'transparent',
+                width: '100%',
+                fontSize: 14,
+                color: '#64748b'
               }}
-            >
-              ✕
-            </button>
+            />
           </div>
         )}
+
+        {/* Iconos/Menú de navegación */}
+        <nav style={{flex: 1, width: '100%', padding: sidebarExpanded ? '0 12px' : '0'}}>
+          <button 
+            onClick={() => setView('home')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'home' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'home' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'home' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'home' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'home') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'home') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Inicio' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>🏠</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Inicio</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setView('perfil')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'perfil' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'perfil' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'perfil' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'perfil' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'perfil') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'perfil') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Mi Perfil' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>👤</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Mi Perfil</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setView('empleados')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'empleados' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'empleados' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'empleados' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'empleados' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'empleados') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'empleados') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Empleados' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>👥</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Empleados</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => setView('equipos')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'equipos' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'equipos' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'equipos' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'equipos' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'equipos') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'equipos') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Equipos' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>📦</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Equipos</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => {setView('instalacion'); setTipoInstalacion(''); setInstalacionStep(0); setPagoInstalacionPropiaExitoso(false);}} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'instalacion' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'instalacion' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'instalacion' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'instalacion' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'instalacion') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'instalacion') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Instalación' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>⬇️</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Instalación</span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => membresiaActiva ? setView('census') : setError('⚠️ Necesitas una membresía activa para censar equipos. Por favor, realiza un pago.')} 
+            disabled={!membresiaActiva}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'census' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: membresiaActiva ? (view === 'census' ? '#1e293b' : '#64748b') : '#94a3b8',
+              cursor: membresiaActiva ? 'pointer' : 'not-allowed',
+              fontSize: 15,
+              fontWeight: view === 'census' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'census' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              opacity: membresiaActiva ? 1 : 0.6
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'census' && membresiaActiva) {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'census' && membresiaActiva) {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? (membresiaActiva ? 'Censar Equipo' : 'Bloqueado') : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>{membresiaActiva ? '📋' : '🔒'}</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>
+                {membresiaActiva ? 'Censar Equipo' : 'Censar (Bloqueado)'}
+              </span>
+            )}
+          </button>
+
+          <button 
+            onClick={() => membresiaActiva ? setView('tickets') : setError('⚠️ Necesitas una membresía activa para crear tickets. Por favor, realiza un pago.')} 
+            disabled={!membresiaActiva}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'tickets' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: membresiaActiva ? (view === 'tickets' ? '#1e293b' : '#64748b') : '#94a3b8',
+              cursor: membresiaActiva ? 'pointer' : 'not-allowed',
+              fontSize: 15,
+              fontWeight: view === 'tickets' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'tickets' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              opacity: membresiaActiva ? 1 : 0.6
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'tickets' && membresiaActiva) {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'tickets' && membresiaActiva) {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? (membresiaActiva ? 'Tickets' : 'Bloqueado') : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>{membresiaActiva ? '🎫' : '🔒'}</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>
+                {membresiaActiva ? 'Tickets' : 'Tickets (Bloqueado)'}
+              </span>
+            )}
+          </button>
+        </nav>
+
+        {/* Logout */}
+        <div style={{
+          width: '100%',
+          padding: sidebarExpanded ? '12px' : '0',
+          borderTop: '1px solid #d1d5db'
+        }}>
+          <button
+            onClick={() => {
+              localStorage.removeItem('token');
+              localStorage.removeItem('user');
+              window.location.reload();
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0' : '0 auto',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: '#ef4444',
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 500,
+              transition: 'all 0.2s'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#fee2e2'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+            title={!sidebarExpanded ? 'Cerrar sesión' : ''}
+          >
+            <span style={{fontSize: 18, minWidth: 18}}>🚪</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Cerrar sesión</span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Contenido principal */}
+      <div style={{flex:1,padding:32,overflow:'auto',background:'#f8fafc',height:'100vh'}}>
+      <div style={{flex:1,padding:24,overflow:'auto'}}>
         
         {error && (
           <div style={{
@@ -1033,8 +1593,574 @@ export default function ClientDashboard(){
         
         {view==='home' && (
           <div>
-            <h2>Dashboard de Cliente</h2>
-            <p>Bienvenido al portal. Usa el menú lateral para censar equipos.</p>
+            <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8,fontSize:28,fontWeight:700,color:'#1e293b'}}>
+              🏠 Panel de Control
+            </h2>
+            
+            {/* Recuadros informativos de suscripción */}
+            <div style={{
+              display:'grid',
+              gridTemplateColumns:'repeat(auto-fit, minmax(280px, 1fr))',
+              gap:20,
+              marginBottom:32
+            }}>
+              {/* Recuadro 1: Plan Actual */}
+              <div style={{
+                background:'white',
+                borderRadius:12,
+                padding:24,
+                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
+                border:'2px solid #e2e8f0',
+                display:'flex',
+                alignItems:'center',
+                gap:16
+              }}>
+                <div style={{
+                  width:56,
+                  height:56,
+                  borderRadius:12,
+                  background:'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                  fontSize:28,
+                  flexShrink:0
+                }}>
+                  📋
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:'#64748b',marginBottom:4,fontWeight:500}}>Plan Actual</div>
+                  <div style={{fontSize:20,fontWeight:700,color:'#1e293b'}}>
+                    {(() => {
+                      if (!suscripcion) return ;
+                      
+                      const dias = parseInt(suscripcion.dias_agregados);
+                      if (isNaN(dias) || dias <= 0) return 'Sin Plan Activo';
+                      
+                      if (dias >= 365) return 'Plan Anual';
+                      if (dias >= 90) return 'Plan Trimestral';
+                      if (dias >= 30) return 'Plan Mensual';
+                      return 'Plan Personalizado';
+                    })()}
+                  </div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
+                    {suscripcion?.estado === 'activa' ? '✓ Activo' : '⚠ Inactivo'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Recuadro 2: Días Restantes */}
+              <div style={{
+                background:'white',
+                borderRadius:12,
+                padding:24,
+                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
+                border:'2px solid #e2e8f0',
+                display:'flex',
+                alignItems:'center',
+                gap:16
+              }}>
+                <div style={{
+                  width:56,
+                  height:56,
+                  borderRadius:12,
+                  background:'#dbeafe',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                  fontSize:28,
+                  flexShrink:0
+                }}>
+                  ⏰
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:'#64748b',marginBottom:4,fontWeight:500}}>Días Restantes</div>
+                  <div style={{fontSize:28,fontWeight:700,color:'#1e40af'}}>
+                    {suscripcion?.dias_restantes || 0}
+                  </div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
+                    días de servicio
+                  </div>
+                </div>
+              </div>
+
+              {/* Recuadro 3: Fecha de Vencimiento */}
+              <div style={{
+                background:'white',
+                borderRadius:12,
+                padding:24,
+                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
+                border:'2px solid #e2e8f0',
+                display:'flex',
+                alignItems:'center',
+                gap:16
+              }}>
+                <div style={{
+                  width:56,
+                  height:56,
+                  borderRadius:12,
+                  background:'#fef3c7',
+                  display:'flex',
+                  alignItems:'center',
+                  justifyContent:'center',
+                  fontSize:28,
+                  flexShrink:0
+                }}>
+                  📅
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:'#64748b',marginBottom:4,fontWeight:500}}>Vencimiento</div>
+                  <div style={{fontSize:16,fontWeight:700,color:'#92400e'}}>
+                    {suscripcion?.fecha_expiracion 
+                      ? new Date(suscripcion.fecha_expiracion).toLocaleDateString('es-MX', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: 'numeric'
+                        })
+                      : 'No disponible'}
+                  </div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:4}}>
+                    fecha límite
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Calendario de Equipos Agendados */}
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',border:'1px solid #e2e8f0'}}>
+              <h3 style={{fontSize:20,fontWeight:700,color:'#1e293b',marginBottom:20,display:'flex',alignItems:'center',gap:8}}>
+                📅 Calendario de Equipos Programados
+              </h3>
+              
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24}}>
+                <div style={{display:'flex',gap:8}}>
+                  <button
+                    onClick={() => setMesActual(new Date(mesActual.getFullYear(), mesActual.getMonth() - 1))}
+                    style={{
+                      padding:'8px 12px',
+                      background:'#f1f5f9',
+                      border:'1px solid #e2e8f0',
+                      borderRadius:6,
+                      cursor:'pointer',
+                      fontSize:16
+                    }}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => setMesActual(new Date(mesActual.getFullYear(), mesActual.getMonth() + 1))}
+                    style={{
+                      padding:'8px 12px',
+                      background:'#f1f5f9',
+                      border:'1px solid #e2e8f0',
+                      borderRadius:6,
+                      cursor:'pointer',
+                      fontSize:16
+                    }}
+                  >
+                    ›
+                  </button>
+                  <button
+                    onClick={() => setMesActual(new Date())}
+                    style={{
+                      padding:'8px 16px',
+                      background:'#f1f5f9',
+                      border:'1px solid #e2e8f0',
+                      borderRadius:6,
+                      cursor:'pointer',
+                      fontSize:14,
+                      fontWeight:600
+                    }}
+                  >
+                    Hoy
+                  </button>
+                </div>
+                
+                <div style={{fontSize:20,fontWeight:700,color:'#1e293b'}}>
+                  {mesActual.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())}
+                </div>
+              </div>
+              
+              {/* Días de la semana */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:8,marginBottom:8}}>
+                {['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map(dia => (
+                  <div key={dia} style={{
+                    textAlign:'center',
+                    fontSize:14,
+                    fontWeight:600,
+                    color:'#64748b',
+                    padding:8
+                  }}>
+                    {dia}
+                  </div>
+                ))}
+              </div>
+              
+              {/* Grid de días */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(7, 1fr)',gap:8}}>
+                {getDiasDelMes(mesActual).map((diaObj, index) => {
+                  const equiposDia = getEquiposDelDia(diaObj);
+                  const hoy = new Date();
+                  const esHoy = diaObj.esMesActual && 
+                               diaObj.dia === hoy.getDate() &&
+                               mesActual.getMonth() === hoy.getMonth() &&
+                               mesActual.getFullYear() === hoy.getFullYear();
+                  
+                  return (
+                    <div
+                      key={index}
+                      style={{
+                        minHeight:100,
+                        padding:8,
+                        background: diaObj.esMesActual ? 'white' : '#f8fafc',
+                        border: esHoy ? '2px solid #10b981' : '1px solid #e2e8f0',
+                        borderRadius:8,
+                        position:'relative',
+                        cursor: diaObj.esMesActual ? 'pointer' : 'default',
+                        transition: 'all 0.2s ease',
+                        transform: 'scale(1)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (diaObj.esMesActual) {
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                          e.currentTarget.style.background = '#f0f9ff';
+                          e.currentTarget.style.borderColor = '#3b82f6';
+                          e.currentTarget.style.zIndex = '10';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (diaObj.esMesActual) {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.background = 'white';
+                          e.currentTarget.style.borderColor = esHoy ? '#10b981' : '#e2e8f0';
+                          e.currentTarget.style.zIndex = '1';
+                        }
+                      }}
+                      onClick={() => {
+                        if (diaObj.esMesActual) {
+                          setDiaSeleccionado(diaObj);
+                        }
+                      }}
+                    >
+                      <div style={{
+                        fontSize:14,
+                        fontWeight: esHoy ? 700 : 600,
+                        color: diaObj.esMesActual ? '#1e293b' : '#94a3b8',
+                        marginBottom:4
+                      }}>
+                        {diaObj.dia}
+                      </div>
+                      
+                      {equiposDia.length > 0 && (
+                        <div style={{display:'flex',flexDirection:'column',gap:2}}>
+                          {equiposDia.slice(0, 3).map((equipo, i) => {
+                            // Definir color según status
+                            let bgColor = '#3b82f6'; // azul por defecto
+                            let emoji = '📦';
+                            
+                            if (equipo.status === 'programado' || equipo.status === 'instalacion programada') {
+                              bgColor = '#f59e0b'; // naranja
+                              emoji = '📅';
+                            } else if (equipo.status === 'registrado') {
+                              bgColor = '#10b981'; // verde
+                              emoji = '✅';
+                            } else if (equipo.status === 'en_proceso') {
+                              bgColor = '#8b5cf6'; // morado
+                              emoji = '⚙️';
+                            } else if (equipo.status === 'completado') {
+                              bgColor = '#059669'; // verde oscuro
+                              emoji = '✔️';
+                            }
+                            
+                            return (
+                              <div
+                                key={i}
+                                title={`${equipo.marca} ${equipo.modelo} - ${equipo.status}`}
+                                style={{
+                                  padding:'2px 6px',
+                                  background: bgColor,
+                                  color:'white',
+                                  fontSize:11,
+                                  borderRadius:4,
+                                  overflow:'hidden',
+                                  textOverflow:'ellipsis',
+                                  whiteSpace:'nowrap',
+                                  cursor:'pointer',
+                                  fontWeight:600
+                                }}
+                              >
+                                {emoji} {equipo.marca}
+                              </div>
+                            );
+                          })}
+                          
+                          {equiposDia.length > 3 && (
+                            <div style={{
+                              fontSize:10,
+                              color:'#64748b',
+                              fontWeight:600,
+                              marginTop:2
+                            }}>
+                              +{equiposDia.length - 3} más
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Leyenda */}
+              <div style={{
+                marginTop:24,
+                paddingTop:16,
+                borderTop:'1px solid #e2e8f0',
+                display:'flex',
+                gap:24,
+                flexWrap:'wrap'
+              }}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#f59e0b',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>📅 Programado</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#10b981',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>✅ Registrado</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#8b5cf6',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>⚙️ En Proceso</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#059669',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>✔️ Completado</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#3b82f6',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>📦 Otros</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal de detalle del día seleccionado */}
+            {diaSeleccionado && (
+              <>
+                {/* Backdrop difuminado */}
+                <div 
+                  onClick={() => setDiaSeleccionado(null)}
+                  style={{
+                    position:'fixed',
+                    top:0,
+                    left:0,
+                    right:0,
+                    bottom:0,
+                    background:'rgba(0,0,0,0.5)',
+                    backdropFilter:'blur(4px)',
+                    zIndex:1000,
+                    display:'flex',
+                    alignItems:'center',
+                    justifyContent:'center',
+                    padding:20
+                  }}
+                >
+                  {/* Modal */}
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      background:'white',
+                      borderRadius:16,
+                      padding:32,
+                      boxShadow:'0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+                      maxWidth:800,
+                      width:'100%',
+                      maxHeight:'85vh',
+                      overflowY:'auto',
+                      position:'relative',
+                      animation:'modalSlideIn 0.3s ease-out'
+                    }}
+                  >
+                    <style>
+                      {`
+                        @keyframes modalSlideIn {
+                          from {
+                            opacity: 0;
+                            transform: translateY(-20px) scale(0.95);
+                          }
+                          to {
+                            opacity: 1;
+                            transform: translateY(0) scale(1);
+                          }
+                        }
+                      `}
+                    </style>
+                    
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24}}>
+                      <h3 style={{fontSize:24,fontWeight:700,color:'#1e293b',margin:0,display:'flex',alignItems:'center',gap:10}}>
+                        📅 Equipos del {diaSeleccionado.dia} de {mesActual.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}
+                      </h3>
+                      <button
+                        onClick={() => setDiaSeleccionado(null)}
+                        style={{
+                          padding:'8px 12px',
+                          background:'#f1f5f9',
+                          border:'1px solid #e2e8f0',
+                          borderRadius:8,
+                          cursor:'pointer',
+                          fontSize:16,
+                          fontWeight:600,
+                          color:'#64748b',
+                          transition:'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = '#ef4444';
+                          e.target.style.color = 'white';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = '#f1f5f9';
+                          e.target.style.color = '#64748b';
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {(() => {
+                      const equiposDia = getEquiposDelDia(diaSeleccionado);
+
+                      if (equiposDia.length === 0) {
+                        return (
+                          <div style={{
+                            padding:80,
+                            textAlign:'center',
+                            background:'#f8fafc',
+                            borderRadius:12,
+                            border:'1px solid #e2e8f0'
+                          }}>
+                            <div style={{fontSize:80,marginBottom:20}}>📭</div>
+                            <p style={{
+                              fontSize:20,
+                              fontWeight:600,
+                              color:'#1e293b',
+                              margin:'0 0 8px 0'
+                            }}>
+                              No hay equipos programados
+                            </p>
+                            <p style={{
+                              fontSize:15,
+                              color:'#64748b',
+                              margin:0
+                            }}>
+                              Este día no tiene equipos agendados
+                            </p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div>
+                          <h4 style={{
+                            fontSize:16,
+                            fontWeight:600,
+                            color:'#1e293b',
+                            marginBottom:16,
+                            display:'flex',
+                            alignItems:'center',
+                            gap:8
+                          }}>
+                            <div style={{width:12,height:12,background:'#3b82f6',borderRadius:'50%'}}></div>
+                            Equipos Programados ({equiposDia.length})
+                          </h4>
+                          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                            {equiposDia.map((equipo, idx) => {
+                              // Definir colores según status
+                              let bgColor = '#f0f9ff';
+                              let borderColor = '#bfdbfe';
+                              let badgeBg = '#3b82f6';
+                              let statusText = equipo.status || 'N/A';
+                              let emoji = '📦';
+                              
+                              if (equipo.status === 'programado' || equipo.status === 'instalacion programada') {
+                                bgColor = '#fef3c7';
+                                borderColor = '#fcd34d';
+                                badgeBg = '#f59e0b';
+                                statusText = '📅 Programado';
+                                emoji = '📅';
+                              } else if (equipo.status === 'registrado') {
+                                bgColor = '#d1fae5';
+                                borderColor = '#6ee7b7';
+                                badgeBg = '#10b981';
+                                statusText = '✅ Registrado';
+                                emoji = '✅';
+                              } else if (equipo.status === 'en_proceso') {
+                                bgColor = '#ede9fe';
+                                borderColor = '#c4b5fd';
+                                badgeBg = '#8b5cf6';
+                                statusText = '⚙️ En Proceso';
+                                emoji = '⚙️';
+                              } else if (equipo.status === 'completado') {
+                                bgColor = '#d1fae5';
+                                borderColor = '#34d399';
+                                badgeBg = '#059669';
+                                statusText = '✔️ Completado';
+                                emoji = '✔️';
+                              }
+                              
+                              return (
+                                <div
+                                  key={idx}
+                                  style={{
+                                    padding:20,
+                                    background:bgColor,
+                                    border:`2px solid ${borderColor}`,
+                                    borderRadius:10,
+                                    display:'flex',
+                                    justifyContent:'space-between',
+                                    alignItems:'center',
+                                    gap:16
+                                  }}
+                                >
+                                  <div style={{flex:1}}>
+                                    <div style={{fontSize:16,fontWeight:700,color:'#1e293b',marginBottom:6}}>
+                                      {emoji} {equipo.marca} {equipo.modelo}
+                                    </div>
+                                    <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                      📦 Tipo: {equipo.tipo_equipo || 'N/A'}
+                                    </div>
+                                    <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                      🔢 Serie: {equipo.numero_serie || 'N/A'}
+                                    </div>
+                                    {equipo.dia_agendado && (
+                                      <div style={{fontSize:14,fontWeight:600,color:'#3b82f6'}}>
+                                        🕐 {new Date(equipo.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                                    <span style={{
+                                      padding:'6px 12px',
+                                      background: badgeBg,
+                                      color:'white',
+                                      fontSize:12,
+                                      borderRadius:12,
+                                      fontWeight:600
+                                    }}>
+                                      {statusText}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
         {view==='perfil' && (
@@ -1367,54 +2493,159 @@ export default function ClientDashboard(){
           </div>
         )}
         {view==='census' && (
-          <div>
-            <h2>Solicitar Censo de Equipo</h2>
-            
-            {/* Mensaje de éxito con animación */}
-            {success && (
-              <div style={{
-                background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                color:'white',
-                padding:'20px 24px',
-                borderRadius:12,
-                marginBottom:24,
-                boxShadow:'0 4px 12px rgba(16, 185, 129, 0.3)',
-                fontSize:16,
-                fontWeight:600,
+          <div style={{maxWidth:1200,margin:'0 auto'}}>
+            {/* Header */}
+            <div style={{marginBottom:32}}>
+              <h2 style={{
+                fontSize:32,
+                fontWeight:700,
+                color:'#1e293b',
+                marginBottom:8,
                 display:'flex',
                 alignItems:'center',
-                gap:12,
-                animation:'slideDown 0.5s ease-out',
-                border:'2px solid rgba(255,255,255,0.3)'
+                gap:12
               }}>
-                <span style={{fontSize:24}}>✅</span>
+                📋 Solicitar Censo de Equipo
+              </h2>
+              <p style={{fontSize:16,color:'#64748b',margin:0}}>
+                Registra equipos de manera automática o manual
+              </p>
+            </div>
+            
+            {/* Mensaje de éxito con animación - Toast en esquina superior derecha */}
+            {success && (
+              <div style={{
+                position:'fixed',
+                top:20,
+                right:20,
+                background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color:'white',
+                padding:'16px 20px',
+                borderRadius:12,
+                maxWidth:400,
+                boxShadow:'0 10px 25px rgba(16, 185, 129, 0.4)',
+                fontSize:14,
+                fontWeight:600,
+                display:'flex',
+                alignItems:'flex-start',
+                gap:12,
+                animation:'slideInRight 0.5s ease-out',
+                border:'2px solid rgba(255,255,255,0.3)',
+                zIndex:9999
+              }}>
+                <style>
+                  {`
+                    @keyframes slideInRight {
+                      from {
+                        opacity: 0;
+                        transform: translateX(100%);
+                      }
+                      to {
+                        opacity: 1;
+                        transform: translateX(0);
+                      }
+                    }
+                  `}
+                </style>
+                <span style={{fontSize:20,flexShrink:0}}>✅</span>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:18,marginBottom:4}}>¡Censo completado exitosamente!</div>
-                  <div style={{fontSize:14,opacity:0.95}}>Los datos del equipo han sido registrados. Puedes censar otro equipo.</div>
+                  <div style={{fontSize:15,marginBottom:4,fontWeight:700}}>¡Éxito!</div>
+                  <div style={{fontSize:13,opacity:0.95,lineHeight:1.4,whiteSpace:'pre-line'}}>{success}</div>
                 </div>
+                <button
+                  onClick={() => setSuccess('')}
+                  style={{
+                    background:'transparent',
+                    border:'none',
+                    color:'white',
+                    fontSize:18,
+                    cursor:'pointer',
+                    padding:0,
+                    marginLeft:8,
+                    opacity:0.7,
+                    transition:'opacity 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.target.style.opacity = 1}
+                  onMouseLeave={(e) => e.target.style.opacity = 0.7}
+                >
+                  ✕
+                </button>
               </div>
             )}
             
             {/* Mensaje de error */}
             {error && (
               <div style={{
+                position:'fixed',
+                top:20,
+                right:20,
                 background:'#fee2e2',
                 color:'#991b1b',
                 padding:'16px 20px',
-                borderRadius:8,
-                marginBottom:20,
+                borderRadius:12,
+                maxWidth:400,
+                boxShadow:'0 10px 25px rgba(239, 68, 68, 0.3)',
+                fontSize:14,
+                fontWeight:600,
+                display:'flex',
+                alignItems:'flex-start',
+                gap:12,
                 border:'2px solid #fca5a5',
-                fontSize:14
+                zIndex:9999,
+                animation:'slideInRight 0.5s ease-out'
               }}>
-                ⚠️ {error}
+                <span style={{fontSize:20,flexShrink:0}}>⚠️</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,marginBottom:4,fontWeight:700}}>Error</div>
+                  <div style={{fontSize:13,lineHeight:1.4}}>{error}</div>
+                </div>
+                <button
+                  onClick={() => setError('')}
+                  style={{
+                    background:'transparent',
+                    border:'none',
+                    color:'#991b1b',
+                    fontSize:18,
+                    cursor:'pointer',
+                    padding:0,
+                    marginLeft:8,
+                    opacity:0.7,
+                    transition:'opacity 0.2s'
+                  }}
+                  onMouseEnter={(e) => e.target.style.opacity = 1}
+                  onMouseLeave={(e) => e.target.style.opacity = 0.7}
+                >
+                  ✕
+                </button>
               </div>
             )}
             
             {/* Selección de tipo de equipo */}
             {!tipoEquipoSeleccionado && (
-              <div style={{maxWidth:700,margin:'40px auto',textAlign:'center'}}>
-                <h3 style={{fontSize:24,marginBottom:16,color:'#1e293b'}}>¿Qué tipo de equipo vas a censar?</h3>
-                <p style={{fontSize:16,color:'#64748b',marginBottom:32}}>Selecciona el tipo de equipo para continuar</p>
+              <div style={{
+                background:'white',
+                borderRadius:16,
+                padding:40,
+                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
+                border:'1px solid #e2e8f0'
+              }}>
+                <h3 style={{
+                  fontSize:24,
+                  fontWeight:700,
+                  marginBottom:12,
+                  color:'#1e293b',
+                  textAlign:'center'
+                }}>
+                  ¿Qué tipo de equipo vas a censar?
+                </h3>
+                <p style={{
+                  fontSize:16,
+                  color:'#64748b',
+                  marginBottom:40,
+                  textAlign:'center'
+                }}>
+                  Selecciona el tipo de equipo para continuar
+                </p>
                 
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
                   <div 
@@ -1506,40 +2737,146 @@ export default function ClientDashboard(){
 
             {/* Formulario de censo (solo visible después de seleccionar tipo) */}
             {tipoEquipoSeleccionado && (
-              <>
+              <div style={{
+                background:'white',
+                borderRadius:16,
+                padding:40,
+                boxShadow:'0 1px 3px rgba(0,0,0,0.1)',
+                border:'1px solid #e2e8f0'
+              }}>
                 {/* Botón para volver a la selección */}
-                <div style={{marginBottom:20}}>
-                  <button 
-                    onClick={()=>{
-                      setTipoEquipoSeleccionado('');
-                      setArchivoResponsiva(null);
-                      setResponsivaDescargada(false);
-                      setForm({...form, tipo_equipo:''});
-                    }}
-                    style={{padding:'10px 20px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:14,fontWeight:600,display:'flex',alignItems:'center',gap:8}}
-                  >
-                    ← Volver a selección de tipo de equipo
-                  </button>
-                </div>
+                <button 
+                  onClick={()=>{
+                    setTipoEquipoSeleccionado('');
+                    setArchivoResponsiva(null);
+                    setResponsivaDescargada(false);
+                    setForm({...form, tipo_equipo:''});
+                  }}
+                  style={{
+                    padding:'10px 20px',
+                    background:'#f1f5f9',
+                    color:'#475569',
+                    border:'1px solid #e2e8f0',
+                    borderRadius:8,
+                    cursor:'pointer',
+                    fontSize:14,
+                    fontWeight:600,
+                    marginBottom:24,
+                    display:'flex',
+                    alignItems:'center',
+                    gap:8,
+                    transition:'all 0.2s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.background = '#e2e8f0';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.background = '#f1f5f9';
+                  }}
+                >
+                  ← Volver a selección de tipo de equipo
+                </button>
 
                 {/* Censo Automático */}
-                <div style={{background:'#f0fdf4',border:'2px solid #10b981',borderRadius:8,padding:20,marginBottom:20,maxWidth:700}}>
-                  <h3 style={{margin:'0 0 8px 0',fontSize:18,color:'#047857'}}>⚡ Censo Automático (Recomendado)</h3>
-                  <p style={{margin:'0 0 16px 0',fontSize:14,color:'#065f46'}}>Descarga la herramienta para tu sistema operativo, ejecútala y sube el archivo .txt generado.</p>
+                <div style={{
+                  background:'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
+                  border:'2px solid #10b981',
+                  borderRadius:12,
+                  padding:24,
+                  marginBottom:32
+                }}>
+                  <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+                    <span style={{fontSize:28}}>⚡</span>
+                    <h3 style={{margin:0,fontSize:20,fontWeight:700,color:'#047857'}}>
+                      Censo Automático (Recomendado)
+                    </h3>
+                  </div>
+                  <p style={{margin:'0 0 20px 0',fontSize:14,color:'#065f46',lineHeight:1.6}}>
+                    Descarga la herramienta para tu sistema operativo, ejecútala y sube el archivo .txt generado.
+                  </p>
                   
-                  <div style={{display:'flex',gap:12,marginBottom:16}}>
-                    <button type='button' onClick={handleDownloadWindowsTool} style={{flex:1,padding:'12px 24px',background:'#0ea5e9',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:15,fontWeight:600}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:20}}>
+                    <button 
+                      type='button' 
+                      onClick={handleDownloadWindowsTool} 
+                      style={{
+                        padding:'14px 24px',
+                        background:'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                        color:'white',
+                        border:'none',
+                        borderRadius:10,
+                        cursor:'pointer',
+                        fontSize:15,
+                        fontWeight:600,
+                        display:'flex',
+                        alignItems:'center',
+                        justifyContent:'center',
+                        gap:8,
+                        transition:'all 0.2s',
+                        boxShadow:'0 4px 12px rgba(14, 165, 233, 0.3)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 6px 16px rgba(14, 165, 233, 0.4)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = '0 4px 12px rgba(14, 165, 233, 0.3)';
+                      }}
+                    >
                       🪟 Windows (.bat)
                     </button>
-                    <button type='button' onClick={handleDownloadAutoTool} style={{flex:1,padding:'12px 24px',background:'#10b981',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:15,fontWeight:600}}>
+                    <button 
+                      type='button' 
+                      onClick={handleDownloadAutoTool} 
+                      style={{
+                        padding:'14px 24px',
+                        background:'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color:'white',
+                        border:'none',
+                        borderRadius:10,
+                        cursor:'pointer',
+                        fontSize:15,
+                        fontWeight:600,
+                        display:'flex',
+                        alignItems:'center',
+                        justifyContent:'center',
+                        gap:8,
+                        transition:'all 0.2s',
+                        boxShadow:'0 4px 12px rgba(16, 185, 129, 0.3)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                      }}
+                    >
                       🐧 Linux (.sh)
                     </button>
                   </div>
                   
                   {/* Campo para subir archivo txt */}
-                  <div style={{marginTop:16,padding:16,background:'#e0f2fe',borderRadius:8,border:'2px dashed #0284c7'}}>
-                    <label style={{display:'block',marginBottom:8,fontSize:14,fontWeight:600,color:'#0c4a6e'}}>
-                      📁 Cargar archivo de censo (.txt)
+                  <div style={{
+                    padding:20,
+                    background:'white',
+                    borderRadius:10,
+                    border:'2px dashed #0284c7'
+                  }}>
+                    <label style={{
+                      display:'block',
+                      marginBottom:12,
+                      fontSize:15,
+                      fontWeight:600,
+                      color:'#0c4a6e',
+                      display:'flex',
+                      alignItems:'center',
+                      gap:8
+                    }}>
+                      <span style={{fontSize:20}}>📁</span>
+                      Cargar archivo de censo (.txt)
                     </label>
                     <input 
                       type='file' 
@@ -1572,85 +2909,347 @@ export default function ClientDashboard(){
                 )}
             
                 {/* Formulario Manual */}
-                <h3 style={{fontSize:18,marginBottom:12,marginTop:32}}>Formulario Manual</h3>
-                <form onSubmit={handleCensusSubmit} style={{maxWidth:600}}>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <label>Marca *<br/><input required value={form.marca} onChange={e=>setForm({...form,marca:e.target.value})} style={{width:'100%',padding:8}} /></label>
-                <label>Modelo *<br/><input required value={form.modelo} onChange={e=>setForm({...form,modelo:e.target.value})} style={{width:'100%',padding:8}} /></label>
-                <label>No. Serie *<br/><input required value={form.no_serie} onChange={e=>setForm({...form,no_serie:e.target.value})} style={{width:'100%',padding:8}} /></label>
-                <label>Código Registro<br/><input value={form.codigo_registro} onChange={e=>setForm({...form,codigo_registro:e.target.value})} style={{width:'100%',padding:8}} /></label>
-                <label>Memoria RAM<br/><input value={form.memoria_ram} onChange={e=>setForm({...form,memoria_ram:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: 8GB" /></label>
-                <label>Disco Duro<br/><input value={form.disco_duro} onChange={e=>setForm({...form,disco_duro:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: 500GB SSD" /></label>
-                <label>Serie Disco Duro<br/><input value={form.serie_disco_duro} onChange={e=>setForm({...form,serie_disco_duro:e.target.value})} style={{width:'100%',padding:8}} /></label>
-                <label>Sistema Operativo<br/><input value={form.sistema_operativo} onChange={e=>setForm({...form,sistema_operativo:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Windows 11" /></label>
-                <label>Procesador<br/><input value={form.procesador} onChange={e=>setForm({...form,procesador:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Intel i5" /></label>
-                <label>
-                  Empleado Asignado *
-                  <br/>
-                  <select 
-                    required
-                    value={form.empleado_id} 
-                    onChange={e=>{
-                      const selectedEmp = empleados.find(emp => emp.id === parseInt(e.target.value));
-                      setForm({
-                        ...form, 
-                        empleado_id: e.target.value,
-                        nombre_usuario_equipo: selectedEmp ? `${selectedEmp.id_empleado}` : ''
-                      });
-                    }} 
-                    style={{width:'100%',padding:8,border:'1px solid #cbd5e1',borderRadius:4}}
-                  >
-                    <option value="">-- Seleccionar Empleado --</option>
-                    {empleados.map(emp=>(
-                      <option key={emp.id} value={emp.id}>
-                        {emp.id_empleado} - {emp.nombre_empleado}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>Tipo de Equipo<br/><input value={form.tipo_equipo} onChange={e=>setForm({...form,tipo_equipo:e.target.value})} style={{width:'100%',padding:8}} placeholder="Ej: Laptop, Desktop" /></label>
-                <label>Nombre de Equipo<br/><input value={form.nombre_equipo} onChange={e=>setForm({...form,nombre_equipo:e.target.value})} style={{width:'100%',padding:8}} /></label>
+                <div style={{marginTop:32}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+                    <span style={{fontSize:24}}>✍️</span>
+                    <h3 style={{margin:0,fontSize:20,fontWeight:700,color:'#1e293b'}}>
+                      Formulario Manual
+                    </h3>
+                  </div>
+                  <form onSubmit={handleCensusSubmit}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Marca *</span>
+                        <input 
+                          required 
+                          value={form.marca} 
+                          onChange={e=>setForm({...form,marca:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Modelo *</span>
+                        <input 
+                          required 
+                          value={form.modelo} 
+                          onChange={e=>setForm({...form,modelo:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>No. Serie *</span>
+                        <input 
+                          required 
+                          value={form.no_serie} 
+                          onChange={e=>setForm({...form,no_serie:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Código Registro</span>
+                        <input 
+                          value={form.codigo_registro} 
+                          onChange={e=>setForm({...form,codigo_registro:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Memoria RAM</span>
+                        <input 
+                          value={form.memoria_ram} 
+                          onChange={e=>setForm({...form,memoria_ram:e.target.value})} 
+                          placeholder="Ej: 8GB"
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Disco Duro</span>
+                        <input 
+                          value={form.disco_duro} 
+                          onChange={e=>setForm({...form,disco_duro:e.target.value})} 
+                          placeholder="Ej: 500GB SSD"
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Serie Disco Duro</span>
+                        <input 
+                          value={form.serie_disco_duro} 
+                          onChange={e=>setForm({...form,serie_disco_duro:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Sistema Operativo</span>
+                        <input 
+                          value={form.sistema_operativo} 
+                          onChange={e=>setForm({...form,sistema_operativo:e.target.value})} 
+                          placeholder="Ej: Windows 11"
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Procesador</span>
+                        <input 
+                          value={form.procesador} 
+                          onChange={e=>setForm({...form,procesador:e.target.value})} 
+                          placeholder="Ej: Intel i5"
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Empleado Asignado *</span>
+                        <select 
+                          required
+                          value={form.empleado_id} 
+                          onChange={e=>{
+                            const selectedEmp = empleados.find(emp => emp.id === parseInt(e.target.value));
+                            setForm({
+                              ...form, 
+                              empleado_id: e.target.value,
+                              nombre_usuario_equipo: selectedEmp ? `${selectedEmp.id_empleado}` : ''
+                            });
+                          }} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            cursor:'pointer',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        >
+                          <option value="">-- Seleccionar Empleado --</option>
+                          {empleados.map(emp=>(
+                            <option key={emp.id} value={emp.id}>
+                              {emp.id_empleado} - {emp.nombre_empleado}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Tipo de Equipo</span>
+                        <input 
+                          value={form.tipo_equipo} 
+                          onChange={e=>setForm({...form,tipo_equipo:e.target.value})} 
+                          placeholder="Ej: Laptop, Escritorio"
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                      <label style={{display:'flex',flexDirection:'column',gap:6}}>
+                        <span style={{fontSize:14,fontWeight:600,color:'#475569'}}>Nombre de Equipo</span>
+                        <input 
+                          value={form.nombre_equipo} 
+                          onChange={e=>setForm({...form,nombre_equipo:e.target.value})} 
+                          style={{
+                            width:'100%',
+                            padding:'10px 12px',
+                            border:'2px solid #e2e8f0',
+                            borderRadius:8,
+                            fontSize:14,
+                            outline:'none',
+                            transition:'border-color 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                          onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                        />
+                      </label>
+                    </div>
+                    <div style={{display:'flex',gap:12,marginTop:24}}>
+                      <button 
+                        type='submit' 
+                        style={{
+                          flex:1,
+                          padding:'12px 24px',
+                          background:'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+                          color:'white',
+                          border:'none',
+                          borderRadius:10,
+                          cursor:'pointer',
+                          fontWeight:600,
+                          fontSize:16,
+                          boxShadow:'0 4px 12px rgba(79, 70, 229, 0.3)',
+                          transition:'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.transform = 'translateY(-2px)';
+                          e.target.style.boxShadow = '0 6px 16px rgba(79, 70, 229, 0.4)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.transform = 'translateY(0)';
+                          e.target.style.boxShadow = '0 4px 12px rgba(79, 70, 229, 0.3)';
+                        }}
+                      >
+                        📤 Enviar Solicitud
+                      </button>
+                      <button 
+                        type='button' 
+                        onClick={handleClearForm} 
+                        style={{
+                          padding:'12px 24px',
+                          background:'#64748b',
+                          color:'white',
+                          border:'none',
+                          borderRadius:10,
+                          cursor:'pointer',
+                          fontWeight:600,
+                          fontSize:16,
+                          boxShadow:'0 4px 12px rgba(100, 116, 139, 0.3)',
+                          transition:'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = '#475569';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = '#64748b';
+                        }}
+                      >
+                        🗑️ Limpiar
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
-              {error && <div style={{color:'#ff6b6b',marginTop:12}}>{error}</div>}
-              {success && <div style={{color:'#51cf66',marginTop:12}}>{success}</div>}
-              <div style={{display:'flex',gap:12,marginTop:16}}>
-                <button type='submit' style={{flex:1,padding:'10px 20px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>Enviar Solicitud</button>
-                <button type='button' onClick={handleClearForm} style={{padding:'10px 20px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>🗑️ Limpiar</button>
-              </div>
-            </form>
-            </>
-            )}
+              )}
           </div>
+            
         )}
         {view==='tickets' && (
           <div>
-            <h2>Mis Tickets de Soporte</h2>
+            <h2 style={{marginBottom:24,fontSize:28,fontWeight:700,color:'#1e293b'}}>
+              🎫 Mis Tickets de Soporte
+            </h2>
             
             {/* Crear nuevo ticket */}
-            <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:20,marginBottom:24}}>
-              <h3 style={{margin:'0 0 16px 0',fontSize:18,color:'#1e293b'}}>🎫 Crear Nuevo Ticket</h3>
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',marginBottom:24,border:'1px solid #e2e8f0'}}>
+              <h3 style={{fontSize:20,fontWeight:600,color:'#1e293b',marginBottom:20}}>
+                📝 Crear Nuevo Ticket
+              </h3>
               
-              {!ticketForm.titulo ? (
+              {!categoriaSeleccionada ? (
                 <>
-                  <p style={{color:'#64748b',marginBottom:20}}>Selecciona el tipo de problema que estás experimentando:</p>
-                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))',gap:16,marginBottom:24}}>
-                    {[
-                      {titulo:'Problema de Internet',emoji:'🌐',color:'#3b82f6',desc:'Sin conexión o conexión lenta'},
-                      {titulo:'Equipo no Enciende',emoji:'💻',color:'#ef4444',desc:'El equipo no arranca'},
-                      {titulo:'Problema de Impresora',emoji:'🖨️',color:'#8b5cf6',desc:'No imprime o atascos de papel'},
-                      {titulo:'Software no Funciona',emoji:'⚠️',color:'#f59e0b',desc:'Error en programas o aplicaciones'},
-                      {titulo:'Problemas de Correo',emoji:'📧',color:'#06b6d4',desc:'No puedo enviar o recibir emails'},
-                      {titulo:'Contraseña Bloqueada',emoji:'🔒',color:'#ec4899',desc:'Olvidé mi contraseña'},
-                      {titulo:'Virus o Malware',emoji:'🦠',color:'#dc2626',desc:'Sospecha de virus o comportamiento extraño'},
-                      {titulo:'Pantalla con Problemas',emoji:'🖥️',color:'#14b8a6',desc:'Pantalla no se ve bien'},
-                      {titulo:'Teclado o Mouse',emoji:'⌨️',color:'#6366f1',desc:'No responden o funcionan mal'},
-                      {titulo:'Solicitud de Software',emoji:'📦',color:'#10b981',desc:'Necesito instalar un programa'},
-                      {titulo:'Acceso a Carpetas',emoji:'📁',color:'#f97316',desc:'No puedo acceder a archivos compartidos'},
-                      {titulo:'Otro Problema',emoji:'❓',color:'#64748b',desc:'Un problema diferente'}
-                    ].map((problema,idx)=>(
-                      <div 
-                        key={idx}
-                        onClick={()=>setTicketForm({...ticketForm,titulo:problema.titulo})}
+                  <p style={{fontSize:14,color:'#64748b',marginBottom:16}}>
+                    Selecciona el tipo de problema que estás experimentando:
+                  </p>
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))',gap:16}}>
+                    {Object.entries(categoriasTickets).map(([categoria, info]) => (
+                      <div
+                        key={categoria}
+                        onClick={() => setCategoriaSeleccionada(categoria)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'translateY(-4px)'
+                          e.currentTarget.style.borderColor = info.color
+                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.1)'
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'translateY(0)'
+                          e.currentTarget.style.borderColor = '#e2e8f0'
+                          e.currentTarget.style.boxShadow = 'none'
+                        }}
                         style={{
                           background:'white',
                           border:'2px solid #e2e8f0',
@@ -1658,100 +3257,347 @@ export default function ClientDashboard(){
                           padding:20,
                           textAlign:'center',
                           cursor:'pointer',
-                          transition:'all 0.2s',
-                          ':hover':{transform:'translateY(-2px)',borderColor:problema.color}
+                          transition:'all 0.3s'
                         }}
-                        onMouseOver={(e)=>{e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.borderColor=problema.color;e.currentTarget.style.boxShadow='0 4px 12px rgba(0,0,0,0.1)'}}
-                        onMouseOut={(e)=>{e.currentTarget.style.transform='translateY(0)';e.currentTarget.style.borderColor='#e2e8f0';e.currentTarget.style.boxShadow='none'}}
                       >
-                        <div style={{fontSize:48,marginBottom:12}}>{problema.emoji}</div>
-                        <div style={{fontWeight:600,color:'#1e293b',fontSize:15,marginBottom:8}}>{problema.titulo}</div>
-                        <div style={{fontSize:12,color:'#64748b',lineHeight:1.4}}>{problema.desc}</div>
+                        <div style={{fontSize:48,marginBottom:12}}>{info.emoji}</div>
+                        <div style={{fontSize:15,fontWeight:600,color:'#1e293b',lineHeight:1.3}}>
+                          {categoria}
+                        </div>
                       </div>
                     ))}
                   </div>
                 </>
-              ) : (
-                <form onSubmit={handleTicketSubmit}>
-                  <div style={{background:'#dbeafe',border:'2px solid #3b82f6',borderRadius:8,padding:16,marginBottom:16}}>
+              ) : !subcategoriaSeleccionada ? (
+                <>
+                  <div style={{background:'#dbeafe',border:'2px solid #3b82f6',borderRadius:8,padding:16,marginBottom:20}}>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <div>
-                        <div style={{fontSize:13,color:'#1e40af',marginBottom:4}}>Problema seleccionado:</div>
-                        <div style={{fontSize:18,fontWeight:600,color:'#1e293b'}}>{ticketForm.titulo}</div>
+                      <div style={{display:'flex',alignItems:'center',gap:12}}>
+                        <div style={{fontSize:32}}>{categoriasTickets[categoriaSeleccionada].emoji}</div>
+                        <div>
+                          <div style={{fontSize:13,color:'#1e40af',marginBottom:4}}>Categoría seleccionada:</div>
+                          <div style={{fontSize:18,fontWeight:600,color:'#1e293b'}}>{categoriaSeleccionada}</div>
+                        </div>
                       </div>
                       <button 
                         type="button"
-                        onClick={()=>setTicketForm({titulo:'',descripcion:'',prioridad:'media'})}
-                        style={{padding:'8px 16px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:13}}
+                        onClick={() => setCategoriaSeleccionada('')}
+                        style={{padding:'8px 16px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:600}}
                       >
                         ← Cambiar
                       </button>
                     </div>
                   </div>
                   
-                  <label style={{display:'block',marginBottom:12}}>
-                    Descripción Detallada *
+                  <p style={{fontSize:14,color:'#64748b',marginBottom:16}}>
+                    Ahora selecciona el problema específico:
+                  </p>
+                  
+                  <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                    {categoriasTickets[categoriaSeleccionada].subcategorias.map((subcat) => (
+                      <div
+                        key={subcat}
+                        onClick={() => setSubcategoriaSeleccionada(subcat)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = '#f8fafc'
+                          e.currentTarget.style.borderColor = categoriasTickets[categoriaSeleccionada].color
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'white'
+                          e.currentTarget.style.borderColor = '#e2e8f0'
+                        }}
+                        style={{
+                          background:'white',
+                          border:'2px solid #e2e8f0',
+                          borderRadius:8,
+                          padding:16,
+                          cursor:'pointer',
+                          transition:'all 0.2s',
+                          display:'flex',
+                          alignItems:'center',
+                          gap:12
+                        }}
+                      >
+                        <div style={{
+                          width:12,
+                          height:12,
+                          borderRadius:'50%',
+                          background:categoriasTickets[categoriaSeleccionada].color
+                        }}></div>
+                        <div style={{fontSize:15,fontWeight:500,color:'#1e293b'}}>{subcat}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <form onSubmit={handleTicketSubmit}>
+                  <div style={{background:'#dbeafe',border:'2px solid #3b82f6',borderRadius:8,padding:16,marginBottom:20}}>
+                    <div style={{display:'flex',alignItems:'start',justifyContent:'space-between'}}>
+                      <div>
+                        <div style={{fontSize:13,color:'#1e40af',marginBottom:8}}>Problema seleccionado:</div>
+                        <div style={{fontSize:16,fontWeight:600,color:'#1e293b',marginBottom:4}}>
+                          {categoriasTickets[categoriaSeleccionada].emoji} {categoriaSeleccionada}
+                        </div>
+                        <div style={{fontSize:14,color:'#475569'}}>
+                          → {subcategoriaSeleccionada}
+                        </div>
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          setCategoriaSeleccionada('')
+                          setSubcategoriaSeleccionada('')
+                        }}
+                        style={{padding:'8px 16px',background:'#64748b',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontSize:13,fontWeight:600}}
+                      >
+                        ← Cambiar
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <label style={{display:'block',marginBottom:20}}>
+                    <div style={{fontSize:14,fontWeight:600,color:'#1e293b',marginBottom:8}}>
+                      Descripción Detallada del Problema *
+                    </div>
                     <textarea 
                       required 
-                      value={ticketForm.descripcion} 
-                      onChange={e=>setTicketForm({...ticketForm,descripcion:e.target.value})} 
-                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4,minHeight:120,fontFamily:'inherit'}}
-                      placeholder="Describe con más detalle el problema que estás experimentando"
+                      value={descripcionTicket} 
+                      onChange={(e) => setDescripcionTicket(e.target.value)} 
+                      style={{
+                        width:'100%',
+                        padding:12,
+                        border:'2px solid #e2e8f0',
+                        borderRadius:8,
+                        minHeight:120,
+                        fontFamily:'inherit',
+                        fontSize:14,
+                        resize:'vertical'
+                      }}
+                      placeholder="Describe con el mayor detalle posible el problema que estás experimentando. Incluye pasos para reproducirlo, mensajes de error, etc."
                     />
                   </label>
                   
-                  <label style={{display:'block',marginBottom:16}}>
-                    Prioridad
-                    <select 
-                      value={ticketForm.prioridad} 
-                      onChange={e=>setTicketForm({...ticketForm,prioridad:e.target.value})} 
-                      style={{width:'100%',padding:10,marginTop:4,border:'1px solid #cbd5e1',borderRadius:4}}
+                  <div style={{marginBottom:20}}>
+                    <div style={{fontSize:14,fontWeight:600,color:'#1e293b',marginBottom:8}}>
+                      Archivos Adjuntos (Opcional)
+                    </div>
+                    <div style={{
+                      border:'2px dashed #cbd5e1',
+                      borderRadius:8,
+                      padding:20,
+                      background:'#f8fafc',
+                      textAlign:'center'
+                    }}>
+                      <input 
+                        type="file" 
+                        multiple
+                        onChange={(e) => setArchivosTicket(Array.from(e.target.files))}
+                        style={{display:'none'}}
+                        id="archivo-ticket-input"
+                        accept="image/*,.el,.err,.log,.txt"
+                      />
+                      <label htmlFor="archivo-ticket-input" style={{cursor:'pointer'}}>
+                        <div style={{fontSize:32,marginBottom:8}}>📎</div>
+                        <div style={{fontSize:14,color:'#475569',marginBottom:4}}>
+                          Haz clic para seleccionar archivos
+                        </div>
+                        <div style={{fontSize:12,color:'#64748b',fontStyle:'italic',lineHeight:1.5}}>
+                          Puede apoyarnos subiendo imágenes del problema, también con el archivo .el y .err que se genera dentro de la carpeta SEER Tráfico
+                        </div>
+                      </label>
+                      {archivosTicket.length > 0 && (
+                        <div style={{marginTop:16,textAlign:'left'}}>
+                          <div style={{fontSize:13,fontWeight:600,color:'#1e293b',marginBottom:8}}>
+                            Archivos seleccionados:
+                          </div>
+                          {archivosTicket.map((archivo, idx) => (
+                            <div key={idx} style={{
+                              fontSize:12,
+                              color:'#475569',
+                              padding:'4px 8px',
+                              background:'white',
+                              borderRadius:4,
+                              marginBottom:4,
+                              display:'flex',
+                              alignItems:'center',
+                              gap:8
+                            }}>
+                              <span>📄</span>
+                              <span>{archivo.name}</span>
+                              <span style={{color:'#94a3b8'}}>({(archivo.size / 1024).toFixed(1)} KB)</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {error && <div style={{padding:12,background:'#fee2e2',color:'#991b1b',borderRadius:8,marginBottom:16}}>{error}</div>}
+                  {success && <div style={{padding:12,background:'#d1fae5',color:'#065f46',borderRadius:8,marginBottom:16}}>{success}</div>}
+                  
+                  <div style={{display:'flex',gap:12}}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCategoriaSeleccionada('')
+                        setSubcategoriaSeleccionada('')
+                        setDescripcionTicket('')
+                        setArchivosTicket([])
+                      }}
+                      style={{
+                        flex:1,
+                        padding:14,
+                        background:'#f1f5f9',
+                        color:'#475569',
+                        border:'none',
+                        borderRadius:8,
+                        fontSize:15,
+                        fontWeight:600,
+                        cursor:'pointer'
+                      }}
                     >
-                      <option value="baja">Baja</option>
-                      <option value="media">Media</option>
-                      <option value="alta">Alta</option>
-                      <option value="urgente">Urgente</option>
-                    </select>
-                  </label>
-                  
-                  {error && <div style={{color:'#ff6b6b',marginBottom:12}}>{error}</div>}
-                  {success && <div style={{color:'#51cf66',marginBottom:12}}>{success}</div>}
-                  
-                  <button type='submit' style={{padding:'10px 24px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,cursor:'pointer',fontWeight:600}}>
-                    📤 Enviar Ticket
-                  </button>
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      style={{
+                        flex:2,
+                        padding:14,
+                        background:'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                        color:'white',
+                        border:'none',
+                        borderRadius:8,
+                        fontSize:15,
+                        fontWeight:600,
+                        cursor:'pointer',
+                        boxShadow:'0 4px 12px rgba(59, 130, 246, 0.3)'
+                      }}
+                    >
+                      📤 Crear Ticket
+                    </button>
+                  </div>
                 </form>
               )}
             </div>
             
             {/* Lista de tickets */}
-            <div style={{maxWidth:900}}>
-              <h3 style={{fontSize:18,marginBottom:16,color:'#1e293b'}}>📜 Mis Tickets</h3>
+            <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',border:'1px solid #e2e8f0'}}>
+              <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16}}>
+                📋 Mis Tickets
+              </h3>
+              
               {tickets.length === 0 ? (
                 <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
-                  <p style={{color:'#64748b',margin:0}}>No tienes tickets creados aún</p>
+                  <div style={{fontSize:48,marginBottom:16}}>🎫</div>
+                  <p style={{
+                    fontSize:16,
+                    fontWeight:600,
+                    color:'#1e293b',
+                    margin:'0 0 8px 0'
+                  }}>
+                    No tienes tickets creados aún
+                  </p>
+                  <p style={{
+                    fontSize:14,
+                    color:'#64748b',
+                    margin:0
+                  }}>
+                    Crea un ticket para reportar cualquier problema técnico
+                  </p>
                 </div>
               ) : (
                 <div style={{display:'flex',flexDirection:'column',gap:12}}>
                   {tickets.map(ticket=>(
-                    <div key={ticket.id} style={{background:'white',border:'1px solid #e2e8f0',borderRadius:8,padding:16}}>
-                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:8}}>
-                        <h4 style={{margin:0,fontSize:16,color:'#1e293b'}}>{ticket.titulo}</h4>
-                        <span style={{
-                          padding:'4px 12px',
-                          borderRadius:12,
-                          fontSize:12,
-                          fontWeight:600,
-                          background: ticket.estado === 'abierto' ? '#fef3c7' : ticket.estado === 'en_proceso' ? '#dbeafe' : '#d1fae5',
-                          color: ticket.estado === 'abierto' ? '#92400e' : ticket.estado === 'en_proceso' ? '#1e40af' : '#065f46'
-                        }}>
-                          {ticket.estado === 'abierto' ? '🔵 Abierto' : ticket.estado === 'en_proceso' ? '🟡 En Proceso' : '✅ Cerrado'}
-                        </span>
-                      </div>
-                      <p style={{margin:'8px 0',color:'#475569',fontSize:14}}>{ticket.descripcion}</p>
-                      <div style={{display:'flex',gap:16,fontSize:13,color:'#64748b',marginTop:12}}>
-                        <span>🏷️ Prioridad: <strong style={{textTransform:'capitalize'}}>{ticket.prioridad}</strong></span>
-                        <span>📅 {new Date(ticket.created_at).toLocaleDateString('es-ES')}</span>
+                    <div key={ticket.id} style={{
+                      background:'white',
+                      border:'2px solid #e2e8f0',
+                      borderRadius:10,
+                      padding:20,
+                      transition:'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'
+                      // Cargar archivos al hacer hover
+                      if (!archivosTicketsPorId[ticket.id]) {
+                        fetchArchivosTicket(ticket.id)
+                      }
+                    }}
+                    onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:12}}>
+                        <div style={{flex:1}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                            <h4 style={{margin:0,fontSize:16,fontWeight:600,color:'#1e293b'}}>
+                              {ticket.asunto || ticket.titulo}
+                            </h4>
+                            <span style={{
+                              padding:'4px 10px',
+                              borderRadius:12,
+                              fontSize:11,
+                              fontWeight:600,
+                              background: ticket.status === 'abierto' ? '#fef3c7' : ticket.status === 'en_proceso' ? '#dbeafe' : '#d1fae5',
+                              color: ticket.status === 'abierto' ? '#92400e' : ticket.status === 'en_proceso' ? '#1e40af' : '#065f46'
+                            }}>
+                              {ticket.status === 'abierto' ? '🔔 Abierto' : ticket.status === 'en_proceso' ? '⚙️ En Proceso' : '✅ Resuelto'}
+                            </span>
+                          </div>
+                          <p style={{margin:'8px 0',color:'#475569',fontSize:14}}>{ticket.descripcion}</p>
+                          <div style={{display:'flex',gap:16,fontSize:12,color:'#94a3b8',marginTop:12}}>
+                            <span>📅 {new Date(ticket.created_at).toLocaleDateString('es-MX')}</span>
+                          </div>
+                          
+                          {/* Mostrar archivos adjuntos */}
+                          {archivosTicketsPorId[ticket.id] && archivosTicketsPorId[ticket.id].length > 0 && (
+                            <div style={{
+                              marginTop:12,
+                              padding:12,
+                              background:'#f8fafc',
+                              borderRadius:8,
+                              border:'1px solid #e2e8f0'
+                            }}>
+                              <div style={{fontSize:12,fontWeight:600,color:'#64748b',marginBottom:8}}>
+                                📎 Archivos adjuntos ({archivosTicketsPorId[ticket.id].length})
+                              </div>
+                              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                                {archivosTicketsPorId[ticket.id].map(archivo => (
+                                  <button
+                                    key={archivo.id}
+                                    onClick={() => descargarArchivo(archivo.id, archivo.nombre_original)}
+                                    style={{
+                                      display:'flex',
+                                      alignItems:'center',
+                                      gap:8,
+                                      padding:'8px 12px',
+                                      background:'white',
+                                      border:'1px solid #cbd5e1',
+                                      borderRadius:6,
+                                      cursor:'pointer',
+                                      transition:'all 0.2s',
+                                      fontSize:12
+                                    }}
+                                    onMouseEnter={(e) => {
+                                      e.currentTarget.style.background = '#f1f5f9'
+                                      e.currentTarget.style.borderColor = '#94a3b8'
+                                    }}
+                                    onMouseLeave={(e) => {
+                                      e.currentTarget.style.background = 'white'
+                                      e.currentTarget.style.borderColor = '#cbd5e1'
+                                    }}
+                                  >
+                                    <span>📄</span>
+                                    <span style={{flex:1,textAlign:'left',color:'#475569'}}>
+                                      {archivo.nombre_original}
+                                    </span>
+                                    <span style={{color:'#94a3b8',fontSize:11}}>
+                                      {archivo.tamano_archivo ? `${(archivo.tamano_archivo / 1024).toFixed(1)} KB` : ''}
+                                    </span>
+                                    <span>⬇️</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -2888,6 +4734,7 @@ export default function ClientDashboard(){
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }

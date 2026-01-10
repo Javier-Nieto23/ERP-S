@@ -199,6 +199,20 @@ async function run() {
     )`);
     console.log('Tickets table created or already exists.');
 
+    // Tabla para archivos adjuntos de tickets
+    await query(`CREATE TABLE IF NOT EXISTS ticket_archivos (
+      id SERIAL PRIMARY KEY,
+      ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+      nombre_archivo VARCHAR(255) NOT NULL,
+      nombre_original VARCHAR(255) NOT NULL,
+      ruta_archivo TEXT NOT NULL,
+      tipo_archivo VARCHAR(100),
+      tamano_archivo INTEGER,
+      subido_por INTEGER REFERENCES usuarios_empresas(id) ON DELETE SET NULL,
+      fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+    console.log('Ticket archivos table created or already exists.');
+
     // Tabla de pagos/transacciones
     await query(`CREATE TABLE IF NOT EXISTS pagos (
       id SERIAL PRIMARY KEY,

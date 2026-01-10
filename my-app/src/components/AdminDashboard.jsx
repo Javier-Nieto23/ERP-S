@@ -28,6 +28,7 @@ export default function AdminDashboard(){
   const [empresasExpandidas, setEmpresasExpandidas] = useState({})
   const [censoTab, setCensoTab] = useState('disponibles')
   const [sidebarExpanded, setSidebarExpanded] = useState(false)
+  const [diaSeleccionado, setDiaSeleccionado] = useState(null)
   
   // Estados para instalaciones
   const [equiposPorInstalar, setEquiposPorInstalar] = useState([])
@@ -35,6 +36,10 @@ export default function AdminDashboard(){
   const [equipoAProgramarInstalacion, setEquipoAProgramarInstalacion] = useState(null)
   const [fechaInstalacion, setFechaInstalacion] = useState('')
   const [equipoEnInstalacion, setEquipoEnInstalacion] = useState(null)
+
+  // Estados para tickets
+  const [tickets, setTickets] = useState([])
+  const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
 
   // Función para obtener días del mes en formato calendario
   function getDiasDelMes(fecha) {
@@ -78,6 +83,21 @@ export default function AdminDashboard(){
     }
     
     return dias;
+  }
+
+  // Función para mapear status a tipo de servicio
+  function getServicioPorStatus(status) {
+    const servicios = {
+      'programado': 'Censo Programado',
+      'instalacion programada': 'Instalación Programada',
+      'por instalar': 'Por Instalar',
+      'registrado': 'Censo de Equipo',
+      'en_proceso': 'En Proceso',
+      'completado': 'Servicio Completado',
+      'activo': 'Equipo Activo',
+      'pendiente': 'Servicio Pendiente'
+    }
+    return servicios[status?.toLowerCase()] || 'Servicio General'
   }
 
   // Función para obtener censos de un día específico
@@ -154,6 +174,107 @@ export default function AdminDashboard(){
         setEquiposPorInstalar(data.equipos || [])
       }
     }catch(e){ console.error('Error al obtener equipos por instalar:', e) }
+  }
+
+  async function fetchInstalacionesProgramadas(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/admin/instalaciones-programadas`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setInstalacionesProgramadas(data.instalaciones || [])
+      }
+    }catch(e){ console.error('Error al obtener instalaciones programadas:', e) }
+  }
+
+  async function fetchTickets(){
+    try{
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if(res.ok){
+        const data = await res.json()
+        setTickets(data.tickets || [])
+      } else {
+        setError('Error al obtener tickets')
+      }
+    }catch(e){ setError('Error de conexión') }
+  }
+
+  async function fetchArchivosTicket(ticketId) {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/${ticketId}/archivos`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setArchivosTicketsPorId(prev => ({
+          ...prev,
+          [ticketId]: data.archivos || []
+        }))
+      }
+    } catch (e) {
+      console.error('Error al cargar archivos del ticket:', e)
+    }
+  }
+
+  async function descargarArchivo(archivoId, nombreArchivo) {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/archivos/${archivoId}/descargar`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (res.ok) {
+        const blob = await res.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = nombreArchivo
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+        setSuccess('Archivo descargado')
+      } else {
+        setError('Error al descargar el archivo')
+      }
+    } catch (e) {
+      setError('Error de conexión al descargar archivo')
+    }
+  }
+
+  async function cambiarStatusTicket(ticketId, nuevoStatus) {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}` 
+        },
+        body: JSON.stringify({ status: nuevoStatus })
+      })
+      
+      if (res.ok) {
+        setSuccess('Status del ticket actualizado')
+        fetchTickets()
+      } else {
+        setError('Error al actualizar el ticket')
+      }
+    } catch (e) {
+      setError('Error de conexión')
+    }
   }
 
   async function fetchInstalacionesProgramadas(){
@@ -310,6 +431,7 @@ export default function AdminDashboard(){
       fetchInstalacionesProgramadas()
     }
     if(view==='instalaciones') fetchEquiposPorInstalar()
+    if(view==='tickets') fetchTickets()
   }, [view])
 
   return (
@@ -319,13 +441,14 @@ export default function AdminDashboard(){
       width:'100vw',
       margin:0,
       padding:0,
-      background:'#f5f5f5',
+      background:'white',
       fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       position:'fixed',
       top:0,
       left:0,
       right:0,
-      bottom:0
+      bottom:0,
+      overflow:'hidden'
     }}>
       {/* Barra lateral con animación de expansión */}
       <div 
@@ -340,7 +463,8 @@ export default function AdminDashboard(){
           transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           position: 'relative',
           overflow: 'hidden',
-          height: '100vh'
+          height: '100vh',
+          flexShrink: 0
         }}
         onMouseEnter={() => setSidebarExpanded(true)}
         onMouseLeave={() => setSidebarExpanded(false)}
@@ -539,6 +663,49 @@ export default function AdminDashboard(){
               }}>Instalación</span>
             )}
           </button>
+
+          <button 
+            onClick={() => setView('tickets')} 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: sidebarExpanded ? 'flex-start' : 'center',
+              gap: 12,
+              width: sidebarExpanded ? '100%' : 48,
+              height: 48,
+              margin: sidebarExpanded ? '0 0 4px 0' : '0 auto 8px',
+              padding: sidebarExpanded ? '10px 12px' : '0',
+              background: view === 'tickets' ? 'white' : 'transparent',
+              border: 'none',
+              borderRadius: 8,
+              color: view === 'tickets' ? '#1e293b' : '#64748b',
+              cursor: 'pointer',
+              fontSize: 15,
+              fontWeight: view === 'tickets' ? 500 : 400,
+              transition: 'all 0.2s',
+              boxShadow: view === 'tickets' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if(view !== 'tickets') {
+                e.currentTarget.style.background = '#f1f5f9';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if(view !== 'tickets') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+            title={!sidebarExpanded ? 'Tickets' : ''}
+          >
+            <span style={{fontSize: 20, minWidth: 20}}>🎫</span>
+            {sidebarExpanded && (
+              <span style={{
+                whiteSpace: 'nowrap',
+                opacity: sidebarExpanded ? 1 : 0,
+                transition: 'opacity 0.3s ease 0.1s'
+              }}>Tickets de Soporte</span>
+            )}
+          </button>
         </nav>
 
         {/* Logout */}
@@ -588,7 +755,7 @@ export default function AdminDashboard(){
       </div>
 
       {/* Contenido principal */}
-      <div style={{flex:1,padding:32,overflow:'auto',background:'white'}}>
+      <div style={{flex:1,padding:32,overflow:'auto',background:'#f8fafc',height:'100vh'}}>
         {view==='home' && (
           <div>
             <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8}}>
@@ -697,7 +864,33 @@ export default function AdminDashboard(){
                         background: diaObj.esMesActual ? 'white' : '#f8fafc',
                         border: esHoy ? '2px solid #10b981' : '1px solid #e2e8f0',
                         borderRadius:8,
-                        position:'relative'
+                        position:'relative',
+                        cursor: diaObj.esMesActual ? 'pointer' : 'default',
+                        transition: 'all 0.2s ease',
+                        transform: 'scale(1)'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (diaObj.esMesActual) {
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                          e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.15)';
+                          e.currentTarget.style.background = '#f0f9ff';
+                          e.currentTarget.style.borderColor = '#3b82f6';
+                          e.currentTarget.style.zIndex = '10';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (diaObj.esMesActual) {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.background = 'white';
+                          e.currentTarget.style.borderColor = esHoy ? '#10b981' : '#e2e8f0';
+                          e.currentTarget.style.zIndex = '1';
+                        }
+                      }}
+                      onClick={() => {
+                        if (diaObj.esMesActual) {
+                          setDiaSeleccionado(diaObj);
+                        }
                       }}
                     >
                       <div style={{
@@ -717,7 +910,7 @@ export default function AdminDashboard(){
                             return (
                               <div
                                 key={`censo-${i}`}
-                                title={`Censo: ${censo.marca} ${censo.modelo} - ${censo.nombre_empresa} (${censo.status})`}
+                                title={`${censo.nombre_empresa} - ${getServicioPorStatus(censo.status)}`}
                                 style={{
                                   padding:'2px 6px',
                                   background: colorStatus,
@@ -730,7 +923,7 @@ export default function AdminDashboard(){
                                   cursor:'pointer'
                                 }}
                               >
-                                📋 {new Date(censo.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})} {censo.marca}
+                                📋 {new Date(censo.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})} {censo.nombre_empresa}  
                               </div>
                             );
                           })}
@@ -740,7 +933,7 @@ export default function AdminDashboard(){
                             return (
                               <div
                                 key={`inst-${i}`}
-                                title={`Instalación: ${instalacion.marca} ${instalacion.modelo} - ${instalacion.nombre_empresa}`}
+                                title={`${instalacion.nombre_empresa} - ${getServicioPorStatus(instalacion.status)}`}
                                 style={{
                                   padding:'2px 6px',
                                   background: '#f59e0b',
@@ -753,7 +946,7 @@ export default function AdminDashboard(){
                                   cursor:'pointer'
                                 }}
                               >
-                                🔧 {new Date(instalacion.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})} {instalacion.marca}
+                                🔧 {new Date(instalacion.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})} {instalacion.nombre_empresa}
                               </div>
                             );
                           })}
@@ -798,6 +991,305 @@ export default function AdminDashboard(){
                 </div>
               </div>
             </div>
+            
+            {/* Modal de detalle del día seleccionado */}
+            {diaSeleccionado && (
+              <>
+                {/* Backdrop difuminado */}
+                <div 
+                  onClick={() => setDiaSeleccionado(null)}
+                  style={{
+                    position:'fixed',
+                    top:0,
+                    left:0,
+                    right:0,
+                    bottom:0,
+                    background:'rgba(0,0,0,0.5)',
+                    backdropFilter:'blur(4px)',
+                    zIndex:1000,
+                    display:'flex',
+                    alignItems:'center',
+                    justifyContent:'center',
+                    padding:20
+                  }}
+                >
+                  {/* Modal */}
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      background:'white',
+                      borderRadius:16,
+                      padding:32,
+                      boxShadow:'0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)',
+                      maxWidth:800,
+                      width:'100%',
+                      maxHeight:'85vh',
+                      overflowY:'auto',
+                      position:'relative',
+                      animation:'modalSlideIn 0.3s ease-out'
+                    }}
+                  >
+                    <style>
+                      {`
+                        @keyframes modalSlideIn {
+                          from {
+                            opacity: 0;
+                            transform: translateY(-20px) scale(0.95);
+                          }
+                          to {
+                            opacity: 1;
+                            transform: translateY(0) scale(1);
+                          }
+                        }
+                      `}
+                    </style>
+                    
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:24}}>
+                      <h3 style={{fontSize:24,fontWeight:700,color:'#1e293b',margin:0,display:'flex',alignItems:'center',gap:10}}>
+                        📅 Agenda del {diaSeleccionado.dia} de {mesActual.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}
+                      </h3>
+                      <button
+                        onClick={() => setDiaSeleccionado(null)}
+                        style={{
+                          padding:'8px 12px',
+                          background:'#f1f5f9',
+                          border:'1px solid #e2e8f0',
+                          borderRadius:8,
+                          cursor:'pointer',
+                          fontSize:16,
+                          fontWeight:600,
+                          color:'#64748b',
+                          transition:'all 0.2s'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.background = '#ef4444';
+                          e.target.style.color = 'white';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.background = '#f1f5f9';
+                          e.target.style.color = '#64748b';
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                {(() => {
+                  const censos = getCensosDelDia(diaSeleccionado);
+                  const instalaciones = getInstalacionesDelDia(diaSeleccionado);
+                  const total = censos.length + instalaciones.length;
+
+                  if (total === 0) {
+                    return (
+                      <div style={{
+                        padding:80,
+                        textAlign:'center',
+                        background:'#f8fafc',
+                        borderRadius:12,
+                        border:'1px solid #e2e8f0'
+                      }}>
+                        <div style={{fontSize:80,marginBottom:20}}>📭</div>
+                        <p style={{
+                          fontSize:20,
+                          fontWeight:600,
+                          color:'#1e293b',
+                          margin:'0 0 8px 0'
+                        }}>
+                          No hay actividades programadas
+                        </p>
+                        <p style={{
+                          fontSize:15,
+                          color:'#64748b',
+                          margin:0
+                        }}>
+                          Este día no tiene censos ni instalaciones agendadas
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div>
+                      {/* Censos del día */}
+                      {censos.length > 0 && (
+                        <div style={{marginBottom: instalaciones.length > 0 ? 32 : 0}}>
+                          <h4 style={{
+                            fontSize:16,
+                            fontWeight:600,
+                            color:'#1e293b',
+                            marginBottom:16,
+                            display:'flex',
+                            alignItems:'center',
+                            gap:8
+                          }}>
+                            <div style={{width:12,height:12,background:'#3b82f6',borderRadius:'50%'}}></div>
+                            Censos Programados ({censos.length})
+                          </h4>
+                          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                            {censos.map((censo, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  padding:20,
+                                  background:'#f0f9ff',
+                                  border:'2px solid #bfdbfe',
+                                  borderRadius:10,
+                                  display:'flex',
+                                  justifyContent:'space-between',
+                                  alignItems:'center',
+                                  gap:16
+                                }}
+                              >
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:16,fontWeight:700,color:'#1e293b',marginBottom:6}}>
+                                    🏢 {censo.nombre_empresa}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#3b82f6',marginBottom:4,fontWeight:600}}>
+                                    📋 {getServicioPorStatus(censo.status)}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    💻 {censo.marca} {censo.modelo}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    👤 {censo.nombre_empleado || 'Sin asignar'}
+                                  </div>
+                                  <div style={{fontSize:14,fontWeight:600,color:'#3b82f6'}}>
+                                    🕐 {new Date(censo.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})}
+                                  </div>
+                                </div>
+                                <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                                  <span style={{
+                                    padding:'6px 12px',
+                                    background: censo.status === 'registrado' ? '#3b82f6' : '#10b981',
+                                    color:'white',
+                                    fontSize:12,
+                                    borderRadius:12,
+                                    fontWeight:600
+                                  }}>
+                                    {censo.status === 'registrado' ? '📋 Registrado' : '✓ Programado'}
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      setEquipoEnCenso(censo);
+                                      setDiaSeleccionado(null);
+                                    }}
+                                    style={{
+                                      padding:'10px 20px',
+                                      background:'#3b82f6',
+                                      color:'white',
+                                      border:'none',
+                                      borderRadius:8,
+                                      fontSize:14,
+                                      fontWeight:600,
+                                      cursor:'pointer',
+                                      transition:'all 0.2s',
+                                      whiteSpace:'nowrap'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.background = '#2563eb'}
+                                    onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
+                                  >
+                                    ✓ Realizar Censo
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Instalaciones del día */}
+                      {instalaciones.length > 0 && (
+                        <div>
+                          <h4 style={{
+                            fontSize:16,
+                            fontWeight:600,
+                            color:'#1e293b',
+                            marginBottom:16,
+                            display:'flex',
+                            alignItems:'center',
+                            gap:8
+                          }}>
+                            <div style={{width:12,height:12,background:'#f59e0b',borderRadius:'50%'}}></div>
+                            Instalaciones Programadas ({instalaciones.length})
+                          </h4>
+                          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                            {instalaciones.map((instalacion, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  padding:20,
+                                  background:'#fffbeb',
+                                  border:'2px solid #fde68a',
+                                  borderRadius:10,
+                                  display:'flex',
+                                  justifyContent:'space-between',
+                                  alignItems:'center',
+                                  gap:16
+                                }}
+                              >
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:16,fontWeight:700,color:'#1e293b',marginBottom:6}}>
+                                    🏢 {instalacion.nombre_empresa}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#f59e0b',marginBottom:4,fontWeight:600}}>
+                                    🔧 {getServicioPorStatus(instalacion.status)}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    💻 {instalacion.marca} {instalacion.modelo}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    👤 {instalacion.nombre_empleado || 'Sin asignar'}
+                                  </div>
+                                  <div style={{fontSize:14,fontWeight:600,color:'#f59e0b'}}>
+                                    🕐 {new Date(instalacion.dia_agendado).toLocaleTimeString('es-MX', {hour: '2-digit', minute: '2-digit'})}
+                                  </div>
+                                </div>
+                                <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                                  <span style={{
+                                    padding:'6px 12px',
+                                    background:'#f59e0b',
+                                    color:'white',
+                                    fontSize:12,
+                                    borderRadius:12,
+                                    fontWeight:600
+                                  }}>
+                                    🔧 Instalación
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      setEquipoEnInstalacion(instalacion);
+                                      setDiaSeleccionado(null);
+                                    }}
+                                    style={{
+                                      padding:'10px 20px',
+                                      background:'#f59e0b',
+                                      color:'white',
+                                      border:'none',
+                                      borderRadius:8,
+                                      fontSize:14,
+                                      fontWeight:600,
+                                      cursor:'pointer',
+                                      transition:'all 0.2s',
+                                      whiteSpace:'nowrap'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.background = '#d97706'}
+                                    onMouseLeave={(e) => e.target.style.background = '#f59e0b'}
+                                  >
+                                    🔧 Realizar Instalación
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                  </div>
+                </div>
+              </>
+            )}
             
             {/* Tarjetas de Estadísticas */}
             <div style={{
@@ -2285,8 +2777,8 @@ export default function AdminDashboard(){
       
       {/* Vista de Instalaciones */}
       {view==='instalaciones' && (
-        <div>
-          <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8}}>
+        <div style={{width:'100%',height:'100%'}}>
+          <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8,fontSize:28,fontWeight:700,color:'#1e293b'}}>
             🔧 Gestión de Instalaciones
           </h2>
           
@@ -2294,7 +2786,7 @@ export default function AdminDashboard(){
           {success && <div style={{padding:12,background:'#d1fae5',color:'#065f46',borderRadius:8,marginBottom:16}}>{success}</div>}
           
           {/* Equipos por instalar */}
-          <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',marginBottom:24}}>
+          <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',marginBottom:24,border:'1px solid #e2e8f0'}}>
             <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
               📦 Equipos Por Instalar ({equiposPorInstalar.length})
             </h3>
@@ -2372,7 +2864,7 @@ export default function AdminDashboard(){
           </div>
           
           {/* Instalaciones Programadas */}
-          <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',marginBottom:24}}>
+          <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',marginBottom:24,border:'1px solid #e2e8f0'}}>
             <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
               <span style={{display:'inline-block',width:12,height:12,borderRadius:'50%',background:'#f59e0b'}}></span>
               Instalaciones Programadas ({instalacionesProgramadas.length})
@@ -2702,6 +3194,223 @@ export default function AdminDashboard(){
                 ✓ Completar Instalación
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vista de Tickets de Soporte */}
+      {view==='tickets' && (
+        <div style={{width:'100%',height:'100%'}}>
+          <h2 style={{marginBottom:24,display:'flex',alignItems:'center',gap:8,fontSize:28,fontWeight:700,color:'#1e293b'}}>
+            🎫 Tickets de Soporte
+          </h2>
+          
+          {error && <div style={{padding:12,background:'#fee2e2',color:'#991b1b',borderRadius:8,marginBottom:16}}>{error}</div>}
+          {success && <div style={{padding:12,background:'#d1fae5',color:'#065f46',borderRadius:8,marginBottom:16}}>{success}</div>}
+          
+          {/* Lista de Tickets */}
+          <div style={{background:'white',borderRadius:12,padding:24,boxShadow:'0 1px 3px rgba(0,0,0,0.1)',border:'1px solid #e2e8f0'}}>
+            <h3 style={{fontSize:18,fontWeight:600,color:'#1e293b',marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
+              📋 Todos los Tickets ({tickets.length})
+            </h3>
+            
+            {tickets.length === 0 ? (
+              <div style={{padding:40,textAlign:'center',background:'#f8fafc',borderRadius:8,border:'1px solid #e2e8f0'}}>
+                <div style={{fontSize:48,marginBottom:16}}>🎫</div>
+                <p style={{fontSize:16,fontWeight:600,color:'#1e293b',margin:'0 0 8px 0'}}>
+                  No hay tickets de soporte
+                </p>
+                <p style={{fontSize:14,color:'#64748b',margin:0}}>
+                  Los tickets creados por clientes aparecerán aquí
+                </p>
+              </div>
+            ) : (
+              <div style={{display:'flex',flexDirection:'column',gap:16}}>
+                {tickets.map(ticket => (
+                  <div 
+                    key={ticket.id} 
+                    style={{
+                      background:'#fafafa',
+                      border:'2px solid #e2e8f0',
+                      borderRadius:10,
+                      padding:20,
+                      transition:'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'
+                      // Cargar archivos al hacer hover
+                      if (!archivosTicketsPorId[ticket.id]) {
+                        fetchArchivosTicket(ticket.id)
+                      }
+                    }}
+                    onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                  >
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'start',marginBottom:16}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+                          <h4 style={{margin:0,fontSize:16,fontWeight:600,color:'#1e293b'}}>
+                            {ticket.asunto || ticket.titulo}
+                          </h4>
+                          <span style={{
+                            padding:'4px 10px',
+                            borderRadius:12,
+                            fontSize:11,
+                            fontWeight:600,
+                            background: ticket.status === 'abierto' ? '#fef3c7' : ticket.status === 'en_proceso' ? '#dbeafe' : '#d1fae5',
+                            color: ticket.status === 'abierto' ? '#92400e' : ticket.status === 'en_proceso' ? '#1e40af' : '#065f46'
+                          }}>
+                            {ticket.status === 'abierto' ? '🔔 Abierto' : ticket.status === 'en_proceso' ? '⚙️ En Proceso' : '✅ Resuelto'}
+                          </span>
+                          {ticket.categoria && (
+                            <span style={{
+                              padding:'4px 10px',
+                              borderRadius:12,
+                              fontSize:11,
+                              fontWeight:600,
+                              background:'#e0e7ff',
+                              color:'#3730a3'
+                            }}>
+                              {ticket.categoria}
+                            </span>
+                          )}
+                        </div>
+                        
+                        <p style={{margin:'8px 0',color:'#475569',fontSize:14}}>{ticket.descripcion}</p>
+                        
+                        <div style={{display:'flex',gap:16,fontSize:12,color:'#94a3b8',marginTop:12,flexWrap:'wrap'}}>
+                          <span>👤 {ticket.cliente_nombre || 'Usuario'}</span>
+                          {ticket.nombre_empresa && <span>🏢 {ticket.nombre_empresa}</span>}
+                          <span>📅 {new Date(ticket.created_at).toLocaleDateString('es-MX')}</span>
+                        </div>
+                        
+                        {/* Mostrar archivos adjuntos */}
+                        {archivosTicketsPorId[ticket.id] && archivosTicketsPorId[ticket.id].length > 0 && (
+                          <div style={{
+                            marginTop:16,
+                            padding:12,
+                            background:'white',
+                            borderRadius:8,
+                            border:'1px solid #e2e8f0'
+                          }}>
+                            <div style={{fontSize:12,fontWeight:600,color:'#64748b',marginBottom:8}}>
+                              📎 Archivos adjuntos ({archivosTicketsPorId[ticket.id].length})
+                            </div>
+                            <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                              {archivosTicketsPorId[ticket.id].map(archivo => (
+                                <button
+                                  key={archivo.id}
+                                  onClick={() => descargarArchivo(archivo.id, archivo.nombre_original)}
+                                  style={{
+                                    display:'flex',
+                                    alignItems:'center',
+                                    gap:8,
+                                    padding:'8px 12px',
+                                    background:'#f8fafc',
+                                    border:'1px solid #cbd5e1',
+                                    borderRadius:6,
+                                    cursor:'pointer',
+                                    transition:'all 0.2s',
+                                    fontSize:12
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.background = '#f1f5f9'
+                                    e.currentTarget.style.borderColor = '#94a3b8'
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.background = '#f8fafc'
+                                    e.currentTarget.style.borderColor = '#cbd5e1'
+                                  }}
+                                >
+                                  <span>📄</span>
+                                  <span style={{flex:1,textAlign:'left',color:'#475569'}}>
+                                    {archivo.nombre_original}
+                                  </span>
+                                  {archivo.subido_por && (
+                                    <span style={{color:'#94a3b8',fontSize:11}}>
+                                      Subido por: Usuario #{archivo.subido_por}
+                                    </span>
+                                  )}
+                                  {archivo.tamano_archivo && (
+                                    <span style={{color:'#94a3b8',fontSize:11}}>
+                                      {(archivo.tamano_archivo / 1024).toFixed(1)} KB
+                                    </span>
+                                  )}
+                                  <span>⬇️</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Botones de acción */}
+                      <div style={{display:'flex',gap:8,marginLeft:16,flexDirection:'column'}}>
+                        {ticket.status === 'abierto' && (
+                          <button
+                            onClick={() => cambiarStatusTicket(ticket.id, 'en_proceso')}
+                            style={{
+                              padding:'6px 12px',
+                              background:'#3b82f6',
+                              color:'white',
+                              border:'none',
+                              borderRadius:6,
+                              fontSize:12,
+                              fontWeight:600,
+                              cursor:'pointer',
+                              whiteSpace:'nowrap'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#2563eb'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = '#3b82f6'}
+                          >
+                            ⚙️ En Proceso
+                          </button>
+                        )}
+                        {ticket.status === 'en_proceso' && (
+                          <button
+                            onClick={() => cambiarStatusTicket(ticket.id, 'resuelto')}
+                            style={{
+                              padding:'6px 12px',
+                              background:'#10b981',
+                              color:'white',
+                              border:'none',
+                              borderRadius:6,
+                              fontSize:12,
+                              fontWeight:600,
+                              cursor:'pointer',
+                              whiteSpace:'nowrap'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#059669'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = '#10b981'}
+                          >
+                            ✅ Resolver
+                          </button>
+                        )}
+                        {ticket.status === 'resuelto' && (
+                          <button
+                            onClick={() => cambiarStatusTicket(ticket.id, 'abierto')}
+                            style={{
+                              padding:'6px 12px',
+                              background:'#f59e0b',
+                              color:'white',
+                              border:'none',
+                              borderRadius:6,
+                              fontSize:12,
+                              fontWeight:600,
+                              cursor:'pointer',
+                              whiteSpace:'nowrap'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = '#d97706'}
+                            onMouseLeave={(e) => e.currentTarget.style.background = '#f59e0b'}
+                          >
+                            🔄 Reabrir
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
