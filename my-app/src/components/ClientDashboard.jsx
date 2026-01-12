@@ -22,7 +22,15 @@ if (!document.querySelector('#censo-animations')) {
   document.head.appendChild(styles)
 }
 
-// Componente para el formulario de pago de servicio
+/**
+ * ServicioPaymentForm - Formulario de pago para servicios de instalación
+ * Integrado con Stripe para procesar pagos de servicios individuales
+ * 
+ * @param {number} monto - Monto del servicio a pagar
+ * @param {Object} datosEquipo - Información del equipo asociado al servicio
+ * @param {Function} onSuccess - Callback cuando el pago es exitoso
+ * @param {Function} onError - Callback cuando ocurre un error
+ */
 function ServicioPaymentForm({ monto, datosEquipo, onSuccess, onError }) {
   const stripe = useStripe()
   const elements = useElements()
@@ -156,6 +164,25 @@ function ServicioPaymentForm({ monto, datosEquipo, onSuccess, onError }) {
   )
 }
 
+/**
+ * ClientDashboard - Panel principal del cliente
+ * 
+ * Funcionalidades:
+ * - Registro de equipos con carga de archivos (responsivas)
+ * - Visualización de calendario de censos programados
+ * - Gestión de empleados de la empresa
+ * - Sistema de tickets de soporte con categorías jerárquicas
+ * - Subida de archivos adjuntos en tickets (imágenes y logs)
+ * - Integración con Stripe para pagos de membresías y servicios
+ * - Gestión de solicitudes de instalación de equipos
+ * 
+ * Vistas disponibles:
+ * - home: Dashboard principal con calendario
+ * - equipos: Registro y gestión de equipos
+ * - empleados: Gestión de empleados
+ * - tickets: Sistema de soporte con categorías
+ * - instalaciones: Solicitudes de instalación
+ */
 export default function ClientDashboard(){
   const [view, setView] = useState('home')
   const [form, setForm] = useState({ marca:'', modelo:'', no_serie:'', codigo_registro:'', memoria_ram:'', disco_duro:'', serie_disco_duro:'', sistema_operativo:'', procesador:'', nombre_usuario_equipo:'', tipo_equipo:'', nombre_equipo:'', empleado_id:'' })
@@ -169,14 +196,17 @@ export default function ClientDashboard(){
   
   // Estados para tickets
   const [tickets, setTickets] = useState([])
-  const [ticketForm, setTicketForm] = useState({ titulo: '', descripcion: '', prioridad: 'media' })
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('')
   const [subcategoriaSeleccionada, setSubcategoriaSeleccionada] = useState('')
   const [descripcionTicket, setDescripcionTicket] = useState('')
   const [archivosTicket, setArchivosTicket] = useState([])
   const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
 
-  // Definición de categorías y subcategorías de tickets
+  /**
+   * Categorías jerárquicas de tickets de soporte
+   * Cada categoría principal contiene múltiples subcategorías específicas
+   * Iconos visuales para identificación rápida
+   */
   const categoriasTickets = {
     'Error Conexión a base de datos': {
       emoji: '🔌',
@@ -271,6 +301,13 @@ export default function ClientDashboard(){
   const [preciosServicios, setPreciosServicios] = useState({})
 
   // Función para obtener días del mes en formato calendario
+  /**
+   * Genera array de días para renderizar calendario mensual
+   * Crea matriz de 6x7 (42 días) incluyendo días de meses adyacentes
+   * 
+   * @param {Date} fecha - Fecha del mes a mostrar
+   * @returns {Array} Array de objetos con {dia, esMesActual}
+   */
   function getDiasDelMes(fecha) {
     const year = fecha.getFullYear()
     const month = fecha.getMonth()
@@ -994,7 +1031,12 @@ export default function ClientDashboard(){
     }
   }
 
-  // Función para cargar archivos de un ticket
+  /**
+   * Carga archivos adjuntos de un ticket específico
+   * Se ejecuta al hacer hover sobre un ticket en la lista
+   * 
+   * @param {number} ticketId - ID del ticket
+   */
   async function fetchArchivosTicket(ticketId) {
     try {
       const token = localStorage.getItem('token')
@@ -1015,7 +1057,13 @@ export default function ClientDashboard(){
     }
   }
 
-  // Función para descargar archivo
+  /**
+   * Descarga un archivo adjunto de un ticket
+   * Crea blob y activa descarga automática en el navegador
+   * 
+   * @param {number} archivoId - ID del archivo en base de datos
+   * @param {string} nombreArchivo - Nombre original del archivo
+   */
   async function descargarArchivo(archivoId, nombreArchivo) {
     try {
       const token = localStorage.getItem('token')
@@ -1042,6 +1090,13 @@ export default function ClientDashboard(){
     }
   }
 
+  /**
+   * Envía nuevo ticket de soporte al backend
+   * Soporta subida de hasta 5 archivos adjuntos (imágenes y logs)
+   * Utiliza FormData para enviar archivos junto con datos del ticket
+   * 
+   * @param {Event} e - Evento del formulario
+   */
   async function handleTicketSubmit(e){
     e.preventDefault()
     setError('')

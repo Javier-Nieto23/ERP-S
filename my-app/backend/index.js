@@ -1,3 +1,18 @@
+/**
+ * Backend API Server - ERP-S
+ * 
+ * Sistema de gestión empresarial con:
+ * - Autenticación JWT
+ * - Integración con Stripe para pagos
+ * - Gestión de equipos, censos e instalaciones
+ * - Sistema de tickets con archivos adjuntos
+ * - Generación dinámica de scripts de instalación
+ * - Gestión de empleados y empresas
+ * 
+ * Puerto: 3001 (desarrollo) / process.env.PORT (producción)
+ * Base de datos: PostgreSQL
+ */
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -75,7 +90,12 @@ app.post('/pagos/webhook', express.raw({type: 'application/json'}), async (req, 
 // Ahora sí, aplicar express.json() para las demás rutas
 app.use(express.json());
 
-// Configurar multer para guardar archivos de responsiva
+/**
+ * Configuración de Multer para archivos de responsiva
+ * - Destino: uploads/responsivas/
+ * - Formato nombre: responsiva-{timestamp}-{random}.ext
+ * - Sin límite de tamaño
+ */
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, 'uploads', 'responsivas');
@@ -91,7 +111,13 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// Configurar multer para archivos de tickets
+/**
+ * Configuración de Multer para archivos de tickets
+ * - Destino: uploads/tickets/
+ * - Formato nombre: ticket-{timestamp}-{random}-{nombre_sanitizado}.ext
+ * - Límite: 10MB por archivo
+ * - Tipos permitidos: imágenes (jpeg, jpg, png, gif, bmp) y logs (el, err, log, txt)
+ */
 const storageTickets = multer.diskStorage({
   destination: function (req, file, cb) {
     const uploadDir = path.join(__dirname, 'uploads', 'tickets');
@@ -127,6 +153,12 @@ const uploadTickets = multer({
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_this_secret';
 
+/**
+ * Middleware: verifyToken
+ * Verifica que el token JWT en el header Authorization sea válido
+ * Formato esperado: "Bearer {token}"
+ * Añade req.user con los datos del payload del token
+ */
 function verifyToken(req, res, next) {
   const auth = req.headers['authorization'] || '';
   console.log('[verifyToken] Authorization header:', auth ? 'presente' : 'ausente');
@@ -147,7 +179,12 @@ function verifyToken(req, res, next) {
   });
 }
 
-// Middleware para verificar membresía activa
+/**
+ * Middleware: verificarMembresia
+ * Verifica que el cliente tenga una membresía activa (fecha_expiracion > NOW)
+ * Permite operaciones de lectura pero bloquea creación si la membresía está vencida
+ * Solo se aplica a usuarios con rol 'cliente'
+ */
 async function verificarMembresia(req, res, next) {
   try {
     const empresa_id = req.user.empresa_id;
@@ -1483,25 +1520,12 @@ pause
   }
 });
 
-// Download census tool for Windows (executable batch)
-app.get('/download/census-tool-windows', verifyToken, (req, res) => {
-  try {
-    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
-    const path = require('path');
-    const filePath = path.join(__dirname, 'ejecutar_censo.bat');
-    res.download(filePath, 'ejecutar_censo.bat', (err) => {
-      if (err) {
-        console.error('download error', err);
-        return res.status(500).json({ error: 'download failed' });
-      }
-    });
-  } catch (err) {
-    console.error('download route error', err);
-    return res.status(500).json({ error: 'server error' });
-  }
-});
-
-// Download census tool for Linux (executable shell)
+/**
+ * Endpoint: GET /download/census-tool-linux
+ * Descarga herramienta de censo para sistemas Linux (.sh)
+ * Genera script ejecutable que recolecta información del sistema
+ * Requiere autenticación y rol de cliente
+ */
 app.get('/download/census-tool-linux', verifyToken, (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
@@ -1521,6 +1545,13 @@ app.get('/download/census-tool-linux', verifyToken, (req, res) => {
 // ==================== TICKETS ENDPOINTS ====================
 
 // Create ticket (cliente only)
+/**
+ * Endpoint: POST /tickets
+ * Crea nuevo ticket de soporte con hasta 5 archivos adjuntos
+ * Acepta: FormData con asunto, descripcion, prioridad, categoria, subcategoria + archivos[]
+ * Guarda archivos en uploads/tickets/ y metadata en tabla ticket_archivos
+ * Requiere membresía activa
+ */
 app.post('/tickets', verifyToken, verificarMembresia, uploadTickets.array('archivos', 5), async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
@@ -1573,6 +1604,12 @@ app.get('/tickets/mine', verifyToken, async (req, res) => {
 });
 
 // List all tickets (admin only)
+/**
+ * Endpoint: GET /tickets
+ * Lista todos los tickets (solo admin)
+ * Incluye información del cliente y empresa asociada
+ * Retorna: { tickets: [...] }
+ */
 app.get('/tickets', verifyToken, async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
@@ -1584,7 +1621,12 @@ app.get('/tickets', verifyToken, async (req, res) => {
   }
 });
 
-// Update ticket status (admin only)
+/**
+ * Endpoint: PATCH /tickets/:id
+ * Actualiza el status de un ticket (abierto|en_proceso|resuelto)
+ * Solo administradores pueden cambiar el status
+ * Acepta: { status }
+ */
 app.patch('/tickets/:id', verifyToken, async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
@@ -1601,7 +1643,12 @@ app.patch('/tickets/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Obtener archivos de un ticket
+/**
+ * Endpoint: GET /tickets/:id/archivos
+ * Obtiene lista de archivos adjuntos de un ticket
+ * Clientes solo ven archivos de sus propios tickets, admins ven todos
+ * Retorna: { archivos: [{id, nombre_original, tamano_archivo, tipo_archivo, fecha_subida, subido_por}] }
+ */
 app.get('/tickets/:id/archivos', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;

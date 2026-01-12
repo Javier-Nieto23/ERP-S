@@ -1,5 +1,21 @@
 import { useEffect, useState } from 'react'
 
+/**
+ * AdminDashboard - Panel de administración principal
+ * 
+ * Funcionalidades:
+ * - Gestión de equipos y censos
+ * - Programación y seguimiento de instalaciones
+ * - Vista de calendario para censos e instalaciones
+ * - Gestión de tickets de soporte con archivos adjuntos
+ * - Generación de códigos de registro y licencias
+ * 
+ * Vistas disponibles:
+ * - home: Dashboard principal con calendario y estadísticas
+ * - equipos: Listado y gestión de equipos
+ * - instalaciones: Gestión de solicitudes de instalación
+ * - tickets: Sistema de soporte con archivos adjuntos
+ */
 export default function AdminDashboard(){
   const [view, setView] = useState('home')
   const [error, setError] = useState('')
@@ -17,12 +33,13 @@ export default function AdminDashboard(){
   const [licenciaCopiada, setLicenciaCopiada] = useState(false)
   const [censosProgramados, setCensosProgramados] = useState([])
   const [mesActual, setMesActual] = useState(new Date())
-  const [estadisticas, setEstadisticas] = useState({
+  // Estadísticas del dashboard (mostradas en tarjetas informativas)
+  const estadisticas = {
     licenciasPendientes: 0,
     ticketsActivos: 0,
     empleados: 0,
     completados: 0
-  })
+  }
   const [servicioTab, setServicioTab] = useState('instalaciones')
   const [empresaFiltro, setEmpresaFiltro] = useState('todas')
   const [empresasExpandidas, setEmpresasExpandidas] = useState({})
@@ -41,7 +58,14 @@ export default function AdminDashboard(){
   const [tickets, setTickets] = useState([])
   const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
 
-  // Función para obtener días del mes en formato calendario
+  /**
+   * Obtiene los días del mes en formato de calendario
+   * Genera un array de 42 elementos (6 filas x 7 días) para renderizar el calendario
+   * Incluye días del mes anterior y siguiente para completar las filas
+   * 
+   * @param {Date} fecha - Fecha del mes a mostrar
+   * @returns {Array} Array de objetos {dia: number, esMesActual: boolean}
+   */
   function getDiasDelMes(fecha) {
     const año = fecha.getFullYear();
     const mes = fecha.getMonth();
@@ -85,7 +109,13 @@ export default function AdminDashboard(){
     return dias;
   }
 
-  // Función para mapear status a tipo de servicio
+  /**
+   * Mapea el status de un equipo a una descripción de servicio legible
+   * Utilizado para mostrar etiquetas descriptivas en el calendario
+   * 
+   * @param {string} status - Status del equipo (programado, instalacion programada, etc.)
+   * @returns {string} Descripción del tipo de servicio
+   */
   function getServicioPorStatus(status) {
     const servicios = {
       'programado': 'Censo Programado',
@@ -132,6 +162,10 @@ export default function AdminDashboard(){
     });
   }
 
+  /**
+   * Obtiene todos los equipos registrados desde el backend
+   * Actualiza el estado de equipos para mostrar en la vista de gestión
+   */
   async function fetchEquipos(){
     try{
       const token = localStorage.getItem('token')
@@ -148,6 +182,10 @@ export default function AdminDashboard(){
     }catch(e){ setError('Error de conexión') }
   }
 
+  /**
+   * Obtiene los censos programados desde el backend
+   * Utilizado para mostrar eventos en el calendario del dashboard
+   */
   async function fetchCensosProgramados(){
     try{
       const token = localStorage.getItem('token')
@@ -162,6 +200,10 @@ export default function AdminDashboard(){
     }catch(e){ console.error('Error al obtener censos:', e) }
   }
 
+  /**
+   * Obtiene equipos pendientes de instalación
+   * Muestra solicitudes de instalación en la vista de instalaciones
+   */
   async function fetchEquiposPorInstalar(){
     try{
       const token = localStorage.getItem('token')
@@ -190,6 +232,10 @@ export default function AdminDashboard(){
     }catch(e){ console.error('Error al obtener instalaciones programadas:', e) }
   }
 
+  /**
+   * Obtiene todos los tickets de soporte desde el backend (solo admin)
+   * Incluye información del cliente y empresa asociada
+   */
   async function fetchTickets(){
     try{
       const token = localStorage.getItem('token')
@@ -206,6 +252,12 @@ export default function AdminDashboard(){
     }catch(e){ setError('Error de conexión') }
   }
 
+  /**
+   * Obtiene los archivos adjuntos de un ticket específico
+   * Carga archivos cuando el admin hace hover sobre un ticket
+   * 
+   * @param {number} ticketId - ID del ticket
+   */
   async function fetchArchivosTicket(ticketId) {
     try {
       const token = localStorage.getItem('token')
@@ -226,6 +278,13 @@ export default function AdminDashboard(){
     }
   }
 
+  /**
+   * Descarga un archivo adjunto de un ticket
+   * Crea un blob y trigger de descarga en el navegador
+   * 
+   * @param {number} archivoId - ID del archivo en la base de datos
+   * @param {string} nombreArchivo - Nombre original del archivo
+   */
   async function descargarArchivo(archivoId, nombreArchivo) {
     try {
       const token = localStorage.getItem('token')
@@ -253,6 +312,13 @@ export default function AdminDashboard(){
     }
   }
 
+  /**
+   * Actualiza el status de un ticket (abierto/en_proceso/resuelto)
+   * Solo administradores pueden cambiar el status de tickets
+   * 
+   * @param {number} ticketId - ID del ticket
+   * @param {string} nuevoStatus - Nuevo status (abierto|en_proceso|resuelto)
+   */
   async function cambiarStatusTicket(ticketId, nuevoStatus) {
     try {
       const token = localStorage.getItem('token')
