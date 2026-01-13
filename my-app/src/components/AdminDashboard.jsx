@@ -53,10 +53,20 @@ export default function AdminDashboard(){
   const [equipoAProgramarInstalacion, setEquipoAProgramarInstalacion] = useState(null)
   const [fechaInstalacion, setFechaInstalacion] = useState('')
   const [equipoEnInstalacion, setEquipoEnInstalacion] = useState(null)
+  const [codigoRegistroInstalacion, setCodigoRegistroInstalacion] = useState('')
 
   // Estados para tickets
   const [tickets, setTickets] = useState([])
   const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
+  const [mostrarNotificacionDescarga, setMostrarNotificacionDescarga] = useState(false)
+  const [nombreArchivoDescargado, setNombreArchivoDescargado] = useState('')
+  const [mostrarNotificacionTicketProgramado, setMostrarNotificacionTicketProgramado] = useState(false)
+  const [mostrarNotificacionCensoCompletado, setMostrarNotificacionCensoCompletado] = useState(false)
+  const [mostrarNotificacionInstalacionProgramada, setMostrarNotificacionInstalacionProgramada] = useState(false)
+  const [mostrarNotificacionInstalacionCompletada, setMostrarNotificacionInstalacionCompletada] = useState(false)
+  const [ticketAProgramar, setTicketAProgramar] = useState(null)
+  const [fechaProgramada, setFechaProgramada] = useState('')
+  const [horaProgramada, setHoraProgramada] = useState('')
 
   /**
    * Obtiene los días del mes en formato de calendario
@@ -159,6 +169,25 @@ export default function AdminDashboard(){
       return fechaInstalacion.getDate() === dia.dia &&
              fechaInstalacion.getMonth() === mes &&
              fechaInstalacion.getFullYear() === año;
+    });
+  }
+
+  // Función para obtener tickets programados de un día específico
+  function getTicketsDelDia(dia) {
+    if (!dia.esMesActual) return [];
+    
+    const año = mesActual.getFullYear();
+    const mes = mesActual.getMonth();
+    const fechaDia = new Date(año, mes, dia.dia);
+    
+    return tickets.filter(ticket => {
+      // Solo tickets con status en_proceso (programados) y que tengan fecha_programada
+      if (ticket.status !== 'en_proceso' || !ticket.fecha_programada) return false;
+      
+      const fechaTicket = new Date(ticket.fecha_programada);
+      return fechaTicket.getDate() === dia.dia &&
+             fechaTicket.getMonth() === mes &&
+             fechaTicket.getFullYear() === año;
     });
   }
 
@@ -303,7 +332,13 @@ export default function AdminDashboard(){
         a.click()
         window.URL.revokeObjectURL(url)
         document.body.removeChild(a)
-        setSuccess('Archivo descargado')
+        
+        // Mostrar notificación de descarga
+        setNombreArchivoDescargado(nombreArchivo)
+        setMostrarNotificacionDescarga(true)
+        setTimeout(() => {
+          setMostrarNotificacionDescarga(false)
+        }, 3000)
       } else {
         setError('Error al descargar el archivo')
       }
@@ -313,13 +348,14 @@ export default function AdminDashboard(){
   }
 
   /**
-   * Actualiza el status de un ticket (abierto/en_proceso/resuelto)
-   * Solo administradores pueden cambiar el status de tickets
+   * Actualiza el status de un ticket (abierto/en_proceso/finalizado)
+   * Envía datos de programación cuando se agenda
    * 
    * @param {number} ticketId - ID del ticket
-   * @param {string} nuevoStatus - Nuevo status (abierto|en_proceso|resuelto)
+   * @param {string} nuevoStatus - Nuevo status (abierto|en_proceso|finalizado)
+   * @param {Object} datosProgramacion - Datos opcionales de programación (fecha, hora, etc.)
    */
-  async function cambiarStatusTicket(ticketId, nuevoStatus) {
+  async function cambiarStatusTicket(ticketId, nuevoStatus, datosProgramacion = {}) {
     try {
       const token = localStorage.getItem('token')
       const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -329,18 +365,73 @@ export default function AdminDashboard(){
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}` 
         },
-        body: JSON.stringify({ status: nuevoStatus })
+        body: JSON.stringify({ 
+          status: nuevoStatus,
+          ...datosProgramacion
+        })
       })
       
       if (res.ok) {
+        // Mostrar notificación animada si es una programación
+        if (nuevoStatus === 'en_proceso' && datosProgramacion.fecha_programada) {
+          setMostrarNotificacionTicketProgramado(true)
+          setTimeout(() => setMostrarNotificacionTicketProgramado(false), 3000)
+        }
         setSuccess('Status del ticket actualizado')
         fetchTickets()
+        setTicketAProgramar(null)
+        setFechaProgramada('')
+        setHoraProgramada('')
       } else {
         setError('Error al actualizar el ticket')
       }
     } catch (e) {
       setError('Error de conexión')
     }
+  }
+
+  /**
+   * Abre modal de programación para un ticket
+   */
+  function abrirModalProgramacion(ticket) {
+    setTicketAProgramar(ticket)
+    // Establecer fecha y hora por defecto (hoy + 1 hora)
+    const ahora = new Date()
+    const mañana = new Date(ahora)
+    mañana.setDate(mañana.getDate() + 1)
+    setFechaProgramada(mañana.toISOString().split('T')[0])
+    
+    ahora.setHours(ahora.getHours() + 1)
+    setHoraProgramada(ahora.toTimeString().slice(0, 5))
+  }
+
+  /**
+   * Programa ticket para más tarde con fecha y hora seleccionadas
+   */
+  function programarTicket() {
+    if (!fechaProgramada || !horaProgramada) {
+      setError('Selecciona fecha y hora')
+      return
+    }
+    
+    cambiarStatusTicket(ticketAProgramar.id, 'en_proceso', {
+      fecha_programada: fechaProgramada,
+      hora_programada: horaProgramada
+    })
+  }
+
+  /**
+   * Programa ticket para realizarse inmediatamente (hoy)
+   */
+  function realizarHoy() {
+    const ahora = new Date()
+    const fecha = ahora.toISOString().split('T')[0]
+    const hora = ahora.toTimeString().slice(0, 5)
+    
+    cambiarStatusTicket(ticketAProgramar.id, 'en_proceso', {
+      fecha_programada: fecha,
+      hora_programada: hora
+    })
   }
 
   async function fetchInstalacionesProgramadas(){
@@ -384,7 +475,8 @@ export default function AdminDashboard(){
       const data = await res.json()
       if(!res.ok) return setError(data.error || 'Error al programar instalación')
       
-      setSuccess('✓ Instalación programada exitosamente')
+      setMostrarNotificacionInstalacionProgramada(true)
+      setTimeout(() => setMostrarNotificacionInstalacionProgramada(false), 4000)
       setEquipoAProgramarInstalacion(null)
       setFechaInstalacion('')
       await fetchEquiposPorInstalar()
@@ -481,7 +573,8 @@ export default function AdminDashboard(){
       const data = await res.json()
       if(!res.ok) return setError(data.error || 'Error al verificar censo')
       
-      setSuccess('✓ Censo verificado exitosamente')
+      setMostrarNotificacionCensoCompletado(true)
+      setTimeout(() => setMostrarNotificacionCensoCompletado(false), 4000)
       setEquipoEnCenso(null)
       setLicencia('')
       await fetchEquipos()
@@ -495,6 +588,7 @@ export default function AdminDashboard(){
     if(view==='home') {
       fetchCensosProgramados()
       fetchInstalacionesProgramadas()
+      fetchTickets()
     }
     if(view==='instalaciones') fetchEquiposPorInstalar()
     if(view==='tickets') fetchTickets()
@@ -516,6 +610,387 @@ export default function AdminDashboard(){
       bottom:0,
       overflow:'hidden'
     }}>
+      {/* Notificación de descarga */}
+      {mostrarNotificacionDescarga && (
+        <div style={{
+          position: 'fixed',
+          top: 20,
+          right: 20,
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 10px 40px rgba(102, 126, 234, 0.4), 0 0 0 1px rgba(255,255,255,0.1)',
+          zIndex: 10000,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
+          minWidth: 300,
+          maxWidth: 400
+        }}>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 28,
+            animation: 'bounce 1s infinite'
+          }}>
+            <style>{`
+              @keyframes bounce {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-5px); }
+              }
+            `}</style>
+            ✅
+          </div>
+          <div style={{flex: 1}}>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 15,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>
+              ¡Descarga Exitosa!
+            </div>
+            <div style={{
+              fontSize: 12,
+              opacity: 0.9,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}>
+              {nombreArchivoDescargado}
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionDescarga(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            ⬇️
+          </div>
+        </div>
+      )}
+
+      {/* Notificación de Ticket Programado */}
+      {mostrarNotificacionInstalacionCompletada && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(16,185,129,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10004,
+          minWidth: 360,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 32,
+            animation: 'pulse 1.5s infinite'
+          }}>>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.15); }
+              }
+            `}</style>
+            ✅
+          </div>
+          <div style={{flex: 1}}>>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 16,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>>
+              ¡Instalación Completada!
+            </div>
+            <div style={{
+              fontSize: 13,
+              opacity: 0.95
+            }}>>
+              La instalación del equipo se ha finalizado exitosamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionInstalacionCompletada(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >>
+            ⚙️
+          </div>
+        </div>
+      )}
+
+      {mostrarNotificacionInstalacionProgramada && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(245,158,11,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10003,
+          minWidth: 360,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 32,
+            animation: 'pulse 1.5s infinite'
+          }}>>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.15); }
+              }
+            `}</style>
+            🔧
+          </div>
+          <div style={{flex: 1}}>>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 16,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>>
+              ¡Instalación Programada!
+            </div>
+            <div style={{
+              fontSize: 13,
+              opacity: 0.95
+            }}>>
+              La instalación del equipo ha sido agendada correctamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionInstalacionProgramada(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >>
+            📅
+          </div>
+        </div>
+      )}
+
+      {mostrarNotificacionCensoCompletado && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(16,185,129,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10002,
+          minWidth: 360,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 32,
+            animation: 'pulse 1.5s infinite'
+          }}>>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.15); }
+              }
+            `}</style>
+            ✅
+          </div>
+          <div style={{flex: 1}}>>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 16,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>>
+              ¡Censo Completado Exitosamente!
+            </div>
+            <div style={{
+              fontSize: 13,
+              opacity: 0.95
+            }}>>
+              El censo del equipo ha sido verificado correctamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionCensoCompletado(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >>
+            📋
+          </div>
+        </div>
+      )}
+
+      {mostrarNotificacionTicketProgramado && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(59,130,246,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10000,
+          minWidth: 320,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 28,
+            animation: 'bounce 1s infinite'
+          }}>
+            <style>{`
+              @keyframes bounce {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-5px); }
+              }
+            `}</style>
+            📅
+          </div>
+          <div style={{flex: 1}}>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 15,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>
+              ¡Ticket Programado Exitosamente!
+            </div>
+            <div style={{
+              fontSize: 12,
+              opacity: 0.9
+            }}>
+              El ticket ha sido agendado correctamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionTicketProgramado(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            🎫
+          </div>
+        </div>
+      )}
+      
       {/* Barra lateral con animación de expansión */}
       <div 
         style={{
@@ -915,6 +1390,7 @@ export default function AdminDashboard(){
                 {getDiasDelMes(mesActual).map((diaObj, index) => {
                   const censos = getCensosDelDia(diaObj);
                   const instalaciones = getInstalacionesDelDia(diaObj);
+                  const ticketsDia = getTicketsDelDia(diaObj);
                   const hoy = new Date();
                   const esHoy = diaObj.esMesActual && 
                                diaObj.dia === hoy.getDate() &&
@@ -968,7 +1444,7 @@ export default function AdminDashboard(){
                         {diaObj.dia}
                       </div>
                       
-                      {(censos.length > 0 || instalaciones.length > 0) && (
+                      {(censos.length > 0 || instalaciones.length > 0 || ticketsDia.length > 0) && (
                         <div style={{display:'flex',flexDirection:'column',gap:2}}>
                           {/* Mostrar censos */}
                           {censos.slice(0, 2).map((censo, i) => {
@@ -1017,7 +1493,30 @@ export default function AdminDashboard(){
                             );
                           })}
                           
-                          {(censos.length + instalaciones.length) > 4 && (
+                          {/* Mostrar tickets programados */}
+                          {ticketsDia.slice(0, 2).map((ticket, i) => {
+                            return (
+                              <div
+                                key={`ticket-${i}`}
+                                title={`Ticket #${ticket.id} - ${ticket.nombre_empresa || 'Sin empresa'} - ${ticket.titulo}`}
+                                style={{
+                                  padding:'2px 6px',
+                                  background: '#ef4444',
+                                  color:'white',
+                                  fontSize:11,
+                                  borderRadius:4,
+                                  overflow:'hidden',
+                                  textOverflow:'ellipsis',
+                                  whiteSpace:'nowrap',
+                                  cursor:'pointer'
+                                }}
+                              >
+                                🎫 {ticket.hora_programada ? ticket.hora_programada.slice(0,5) : '--:--'} {ticket.nombre_empresa || 'Sin empresa'}
+                              </div>
+                            );
+                          })}
+                          
+                          {(censos.length + instalaciones.length + ticketsDia.length) > 4 && (
                             <div style={{
                               fontSize:10,
                               color:'#64748b',
@@ -1054,6 +1553,10 @@ export default function AdminDashboard(){
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
                   <div style={{width:16,height:16,background:'#f59e0b',borderRadius:4}}></div>
                   <span style={{fontSize:14,color:'#64748b'}}>Instalación Programada</span>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <div style={{width:16,height:16,background:'#ef4444',borderRadius:4}}></div>
+                  <span style={{fontSize:14,color:'#64748b'}}>Tickets Programados</span>
                 </div>
               </div>
             </div>
@@ -1143,7 +1646,8 @@ export default function AdminDashboard(){
                 {(() => {
                   const censos = getCensosDelDia(diaSeleccionado);
                   const instalaciones = getInstalacionesDelDia(diaSeleccionado);
-                  const total = censos.length + instalaciones.length;
+                  const ticketsDia = getTicketsDelDia(diaSeleccionado);
+                  const total = censos.length + instalaciones.length + ticketsDia.length;
 
                   if (total === 0) {
                     return (
@@ -1168,7 +1672,7 @@ export default function AdminDashboard(){
                           color:'#64748b',
                           margin:0
                         }}>
-                          Este día no tiene censos ni instalaciones agendadas
+                          Este día no tiene censos, instalaciones ni tickets programados
                         </p>
                       </div>
                     );
@@ -1178,7 +1682,7 @@ export default function AdminDashboard(){
                     <div>
                       {/* Censos del día */}
                       {censos.length > 0 && (
-                        <div style={{marginBottom: instalaciones.length > 0 ? 32 : 0}}>
+                        <div style={{marginBottom: (instalaciones.length > 0 || ticketsDia.length > 0) ? 32 : 0}}>
                           <h4 style={{
                             fontSize:16,
                             fontWeight:600,
@@ -1236,8 +1740,31 @@ export default function AdminDashboard(){
                                   </span>
                                   <button
                                     onClick={() => {
-                                      setEquipoEnCenso(censo);
+                                      // Limpiar mensajes
+                                      setError('');
+                                      setSuccess('');
+                                      
+                                      // Crear objeto completo con todos los datos necesarios
+                                      const equipoCompleto = {
+                                        id: censo.equipo_id,  // ID del equipo, NO del censo/agenda
+                                        codigo_registro: censo.codigo_registro,
+                                        nombre_empresa: censo.nombre_empresa,
+                                        tipo_equipo: censo.tipo_equipo,
+                                        marca: censo.marca,
+                                        modelo: censo.modelo,
+                                        numero_serie: censo.numero_serie,
+                                        nombre_empleado: censo.nombre_empleado || 'Sin asignar',
+                                        sistema_operativo: censo.sistema_operativo,
+                                        procesador: censo.procesador,
+                                        status: censo.status
+                                      };
+                                      
+                                      // Cerrar modal de agenda del día
                                       setDiaSeleccionado(null);
+                                      // Cambiar a vista de solicitudes de censo
+                                      setView('equipos');
+                                      // Establecer el equipo para realizar censo
+                                      setEquipoEnCenso(equipoCompleto);
                                     }}
                                     style={{
                                       padding:'10px 20px',
@@ -1323,8 +1850,23 @@ export default function AdminDashboard(){
                                   </span>
                                   <button
                                     onClick={() => {
-                                      setEquipoEnInstalacion(instalacion);
+                                      // Crear objeto completo con todos los datos necesarios
+                                      const equipoCompleto = {
+                                        id: instalacion.equipo_id,
+                                        nombre_empresa: instalacion.nombre_empresa,
+                                        tipo_equipo: instalacion.tipo_equipo,
+                                        marca: instalacion.marca,
+                                        modelo: instalacion.modelo,
+                                        numero_serie: instalacion.numero_serie,
+                                        nombre_empleado: instalacion.nombre_empleado || 'Sin asignar'
+                                      };
+                                      
+                                      // Cerrar modal de agenda del día
                                       setDiaSeleccionado(null);
+                                      // Cambiar a vista de instalaciones
+                                      setView('instalaciones');
+                                      // Establecer el equipo para completar instalación
+                                      setEquipoEnInstalacion(equipoCompleto);
                                     }}
                                     style={{
                                       padding:'10px 20px',
@@ -1342,6 +1884,96 @@ export default function AdminDashboard(){
                                     onMouseLeave={(e) => e.target.style.background = '#f59e0b'}
                                   >
                                     🔧 Realizar Instalación
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tickets Programados del día */}
+                      {ticketsDia.length > 0 && (
+                        <div>
+                          <h4 style={{
+                            fontSize:16,
+                            fontWeight:600,
+                            color:'#1e293b',
+                            marginBottom:16,
+                            display:'flex',
+                            alignItems:'center',
+                            gap:8
+                          }}>
+                            <div style={{width:12,height:12,background:'#ef4444',borderRadius:'50%'}}></div>
+                            Tickets Programados ({ticketsDia.length})
+                          </h4>
+                          <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                            {ticketsDia.map((ticket, idx) => (
+                              <div
+                                key={idx}
+                                style={{
+                                  padding:20,
+                                  background:'#fef2f2',
+                                  border:'2px solid #fecaca',
+                                  borderRadius:10,
+                                  display:'flex',
+                                  justifyContent:'space-between',
+                                  alignItems:'center',
+                                  gap:16
+                                }}
+                              >
+                                <div style={{flex:1}}>
+                                  <div style={{fontSize:16,fontWeight:700,color:'#1e293b',marginBottom:6}}>
+                                    🎫 Ticket #{ticket.id} - {ticket.titulo}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#ef4444',marginBottom:4,fontWeight:600}}>
+                                    🏢 {ticket.nombre_empresa || 'Sin empresa'}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#ef4444',marginBottom:4,fontWeight:600}}>
+                                    📝 {ticket.asunto || 'Sin asunto'}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    {ticket.descripcion || 'Sin descripción'}
+                                  </div>
+                                  <div style={{fontSize:14,color:'#64748b',marginBottom:4}}>
+                                    📧 {ticket.cliente_email || 'Sin email'}
+                                  </div>
+                                  <div style={{fontSize:14,fontWeight:600,color:'#ef4444'}}>
+                                    🕐 {ticket.hora_programada ? ticket.hora_programada.slice(0,5) : '--:--'}
+                                  </div>
+                                </div>
+                                <div style={{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-end'}}>
+                                  <span style={{
+                                    padding:'6px 12px',
+                                    background:'#ef4444',
+                                    color:'white',
+                                    fontSize:12,
+                                    borderRadius:12,
+                                    fontWeight:600
+                                  }}>
+                                    📅 Programado
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      setDiaSeleccionado(null);
+                                      setView('tickets');
+                                    }}
+                                    style={{
+                                      padding:'10px 20px',
+                                      background:'#3b82f6',
+                                      color:'white',
+                                      border:'none',
+                                      borderRadius:8,
+                                      fontSize:14,
+                                      fontWeight:600,
+                                      cursor:'pointer',
+                                      transition:'all 0.2s',
+                                      whiteSpace:'nowrap'
+                                    }}
+                                    onMouseEnter={(e) => e.target.style.background = '#2563eb'}
+                                    onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
+                                  >
+                                    🔍 Realizar Ticket
                                   </button>
                                 </div>
                               </div>
@@ -1420,10 +2052,10 @@ export default function AdminDashboard(){
                 </div>
                 <div>
                   <div style={{fontSize:32,fontWeight:700,color:'#1e293b'}}>
-                    {estadisticas.ticketsActivos}
+                    {tickets.filter(t => t.status === 'en_proceso').length}
                   </div>
                   <div style={{fontSize:14,color:'#64748b'}}>
-                    Tickets Activos
+                    Tickets Programados
                   </div>
                 </div>
               </div>
@@ -1790,6 +2422,10 @@ export default function AdminDashboard(){
                               <td style={{padding:12,textAlign:'center'}}>
                                 <button
                                   onClick={async () => {
+                                    // Limpiar mensajes
+                                    setError('');
+                                    setSuccess('');
+                                    
                                     // Buscar el equipo completo y abrir modal de censo
                                     const token = localStorage.getItem('token')
                                     const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
@@ -3174,12 +3810,38 @@ export default function AdminDashboard(){
                   <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Empleado</div>
                   <div style={{color:'#1e293b'}}>{equipoEnInstalacion.nombre_empleado || 'Sin asignar'}</div>
                 </div>
-              
-                <div>
-                  <div style={{color:'#64748b',marginBottom:4,fontSize:12,fontWeight:600}}>Código de </div>
-                  <div style={{color:'#1e293b'}}>{equipoEnInstalacion.codigo_registro || 'Sin asignar'}</div>
-                </div>
               </div>
+            </div>
+
+            {/* Campo de Código de Registro */}
+            <div style={{marginBottom:20}}>
+              <label style={{
+                display:'block',
+                fontSize:14,
+                fontWeight:600,
+                color:'#475569',
+                marginBottom:8
+              }}>
+                🔑 Código de Registro *
+              </label>
+              <input
+                type="text"
+                value={codigoRegistroInstalacion}
+                onChange={(e) => setCodigoRegistroInstalacion(e.target.value)}
+                placeholder="Ingrese el código de registro"
+                style={{
+                  width:'100%',
+                  padding:'10px 12px',
+                  border:'2px solid #e2e8f0',
+                  borderRadius:8,
+                  fontSize:14,
+                  color:'#1e293b',
+                  outline:'none',
+                  transition:'all 0.2s'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              />
             </div>
 
             {error && <div style={{padding:12,background:'#fee2e2',color:'#991b1b',borderRadius:8,marginBottom:16}}>{error}</div>}
@@ -3195,6 +3857,7 @@ export default function AdminDashboard(){
               <button
                 onClick={() => {
                   setEquipoEnInstalacion(null)
+                  setCodigoRegistroInstalacion('')
                   setError('')
                   setSuccess('')
                 }}
@@ -3216,33 +3879,53 @@ export default function AdminDashboard(){
                 onClick={async () => {
                   setError('')
                   setSuccess('')
+                  
+                  // Validar código de registro
+                  if (!codigoRegistroInstalacion || codigoRegistroInstalacion.trim() === '') {
+                    return setError('El código de registro es obligatorio')
+                  }
+                  
                   try {
                     const token = localStorage.getItem('token')
                     const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
                     
-                    // Actualizar status del equipo a 'activo'
-                    const res = await fetch(`${API}/equipos/${equipoEnInstalacion.id}/status`, {
-                      method: 'PUT',
+                    console.log('Completando instalación:', {
+                      equipo_id: equipoEnInstalacion.id,
+                      codigo_registro: codigoRegistroInstalacion,
+                      url: `${API}/admin/completar-instalacion`
+                    })
+                    
+                    // Completar instalación con código de registro
+                    const res = await fetch(`${API}/admin/completar-instalacion`, {
+                      method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
                         Authorization: `Bearer ${token}`
                       },
-                      body: JSON.stringify({ status: 'activo' })
+                      body: JSON.stringify({ 
+                        equipo_id: equipoEnInstalacion.id,
+                        codigo_registro: codigoRegistroInstalacion
+                      })
                     })
                     
+                    const data = await res.json()
+                    console.log('Respuesta del servidor:', data)
+                    
                     if (!res.ok) {
-                      const data = await res.json()
-                      return setError(data.error || 'Error al completar instalación')
+                      return setError(data.error || data.mensaje || 'Error al completar instalación')
                     }
                     
-                    setSuccess('✓ Instalación completada exitosamente')
+                    setMostrarNotificacionInstalacionCompletada(true)
+                    setTimeout(() => setMostrarNotificacionInstalacionCompletada(false), 4000)
                     setTimeout(() => {
                       setEquipoEnInstalacion(null)
+                      setCodigoRegistroInstalacion('')
                       fetchEquiposPorInstalar()
                       fetchInstalacionesProgramadas()
                     }, 1500)
                   } catch(e) {
-                    setError('Error de conexión')
+                    console.error('Error al completar instalación:', e)
+                    setError(`Error de conexión: ${e.message}`)
                   }
                 }}
                 style={{
@@ -3322,10 +4005,16 @@ export default function AdminDashboard(){
                             borderRadius:12,
                             fontSize:11,
                             fontWeight:600,
-                            background: ticket.status === 'abierto' ? '#fef3c7' : ticket.status === 'en_proceso' ? '#dbeafe' : '#d1fae5',
-                            color: ticket.status === 'abierto' ? '#92400e' : ticket.status === 'en_proceso' ? '#1e40af' : '#065f46'
+                            background: ticket.status === 'abierto' ? '#fef3c7' : 
+                                       ticket.status === 'en_proceso' ? '#dbeafe' : 
+                                       '#e9d5ff',
+                            color: ticket.status === 'abierto' ? '#92400e' : 
+                                  ticket.status === 'en_proceso' ? '#1e40af' : 
+                                  '#6b21a8'
                           }}>
-                            {ticket.status === 'abierto' ? '🔔 Abierto' : ticket.status === 'en_proceso' ? '⚙️ En Proceso' : '✅ Resuelto'}
+                            {ticket.status === 'abierto' ? '🔔 Abierto' : 
+                             ticket.status === 'en_proceso' ? '📅 Programado' : 
+                             '🏁 Finalizado'}
                           </span>
                           {ticket.categoria && (
                             <span style={{
@@ -3345,6 +4034,7 @@ export default function AdminDashboard(){
                         
                         <div style={{display:'flex',gap:16,fontSize:12,color:'#94a3b8',marginTop:12,flexWrap:'wrap'}}>
                           <span>👤 {ticket.cliente_nombre || 'Usuario'}</span>
+                          {ticket.cliente_email && <span>📧 {ticket.cliente_email}</span>}
                           {ticket.nombre_empresa && <span>🏢 {ticket.nombre_empresa}</span>}
                           <span>📅 {new Date(ticket.created_at).toLocaleDateString('es-MX')}</span>
                         </div>
@@ -3413,7 +4103,7 @@ export default function AdminDashboard(){
                       <div style={{display:'flex',gap:8,marginLeft:16,flexDirection:'column'}}>
                         {ticket.status === 'abierto' && (
                           <button
-                            onClick={() => cambiarStatusTicket(ticket.id, 'en_proceso')}
+                            onClick={() => abrirModalProgramacion(ticket)}
                             style={{
                               padding:'6px 12px',
                               background:'#3b82f6',
@@ -3428,12 +4118,13 @@ export default function AdminDashboard(){
                             onMouseEnter={(e) => e.currentTarget.style.background = '#2563eb'}
                             onMouseLeave={(e) => e.currentTarget.style.background = '#3b82f6'}
                           >
-                            ⚙️ En Proceso
+                            📅 Programar
                           </button>
                         )}
+                        
                         {ticket.status === 'en_proceso' && (
                           <button
-                            onClick={() => cambiarStatusTicket(ticket.id, 'resuelto')}
+                            onClick={() => cambiarStatusTicket(ticket.id, 'finalizado')}
                             style={{
                               padding:'6px 12px',
                               background:'#10b981',
@@ -3448,10 +4139,11 @@ export default function AdminDashboard(){
                             onMouseEnter={(e) => e.currentTarget.style.background = '#059669'}
                             onMouseLeave={(e) => e.currentTarget.style.background = '#10b981'}
                           >
-                            ✅ Resolver
+                            ✅ Realizado
                           </button>
                         )}
-                        {ticket.status === 'resuelto' && (
+                        
+                        {ticket.status === 'finalizado' && (
                           <button
                             onClick={() => cambiarStatusTicket(ticket.id, 'abierto')}
                             style={{
@@ -3477,6 +4169,207 @@ export default function AdminDashboard(){
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Programación de Tickets */}
+      {ticketAProgramar && (
+        <div style={{
+          position:'fixed',
+          top:0,
+          left:0,
+          right:0,
+          bottom:0,
+          background:'rgba(0,0,0,0.5)',
+          display:'flex',
+          alignItems:'center',
+          justifyContent:'center',
+          zIndex:1000
+        }}>
+          <div style={{
+            background:'white',
+            borderRadius:12,
+            padding:32,
+            width:'90%',
+            maxWidth:500,
+            boxShadow:'0 20px 60px rgba(0,0,0,0.3)'
+          }}>
+            <h3 style={{
+              fontSize:22,
+              fontWeight:700,
+              color:'#1e293b',
+              marginBottom:20,
+              display:'flex',
+              alignItems:'center',
+              gap:10
+            }}>
+              📅 Programar Ticket #{ticketAProgramar.id}
+            </h3>
+
+            {/* Información del ticket */}
+            <div style={{
+              background:'#f8fafc',
+              padding:16,
+              borderRadius:8,
+              marginBottom:24,
+              border:'1px solid #e2e8f0'
+            }}>
+              <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>Título</div>
+              <div style={{fontSize:15,fontWeight:600,color:'#1e293b',marginBottom:12}}>
+                {ticketAProgramar.titulo}
+              </div>
+              
+              <div style={{fontSize:13,color:'#64748b',marginBottom:4}}>Descripción</div>
+              <div style={{fontSize:14,color:'#475569'}}>
+                {ticketAProgramar.descripcion || 'Sin descripción'}
+              </div>
+            </div>
+
+            {/* Selector de fecha */}
+            <div style={{marginBottom:20}}>
+              <label style={{
+                display:'block',
+                fontSize:14,
+                fontWeight:600,
+                color:'#475569',
+                marginBottom:8
+              }}>
+                📆 Fecha
+              </label>
+              <input
+                type="date"
+                value={fechaProgramada}
+                onChange={(e) => setFechaProgramada(e.target.value)}
+                style={{
+                  width:'100%',
+                  padding:'10px 12px',
+                  border:'2px solid #e2e8f0',
+                  borderRadius:8,
+                  fontSize:14,
+                  color:'#1e293b',
+                  outline:'none',
+                  transition:'all 0.2s'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              />
+            </div>
+
+            {/* Selector de hora */}
+            <div style={{marginBottom:24}}>
+              <label style={{
+                display:'block',
+                fontSize:14,
+                fontWeight:600,
+                color:'#475569',
+                marginBottom:8
+              }}>
+                🕐 Hora
+              </label>
+              <input
+                type="time"
+                value={horaProgramada}
+                onChange={(e) => setHoraProgramada(e.target.value)}
+                style={{
+                  width:'100%',
+                  padding:'10px 12px',
+                  border:'2px solid #e2e8f0',
+                  borderRadius:8,
+                  fontSize:14,
+                  color:'#1e293b',
+                  outline:'none',
+                  transition:'all 0.2s'
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+              />
+            </div>
+
+            {/* Botones */}
+            <div style={{display:'flex',gap:12}}>
+              <button
+                onClick={() => {
+                  setTicketAProgramar(null)
+                  setFechaProgramada('')
+                  setHoraProgramada('')
+                }}
+                style={{
+                  flex:1,
+                  padding:'12px 20px',
+                  background:'#f1f5f9',
+                  color:'#475569',
+                  border:'1px solid #cbd5e1',
+                  borderRadius:8,
+                  fontSize:14,
+                  fontWeight:600,
+                  cursor:'pointer',
+                  transition:'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#e2e8f0'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#f1f5f9'
+                }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={realizarHoy}
+                style={{
+                  flex:1,
+                  padding:'12px 20px',
+                  background:'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  color:'white',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:14,
+                  fontWeight:600,
+                  cursor:'pointer',
+                  transition:'all 0.2s',
+                  boxShadow:'0 2px 8px rgba(245,158,11,0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)'
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(245,158,11,0.4)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)'
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(245,158,11,0.3)'
+                }}
+              >
+                ⚡ Realizar Hoy
+              </button>
+
+              <button
+                onClick={programarTicket}
+                style={{
+                  flex:1,
+                  padding:'12px 20px',
+                  background:'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                  color:'white',
+                  border:'none',
+                  borderRadius:8,
+                  fontSize:14,
+                  fontWeight:600,
+                  cursor:'pointer',
+                  transition:'all 0.2s',
+                  boxShadow:'0 2px 8px rgba(59,130,246,0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)'
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(59,130,246,0.4)'
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)'
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(59,130,246,0.3)'
+                }}
+              >
+                📅 Programar
+              </button>
+            </div>
           </div>
         </div>
       )}

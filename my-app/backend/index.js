@@ -137,13 +137,19 @@ const uploadTickets = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB límite
   fileFilter: function (req, file, cb) {
     // Aceptar imágenes y archivos .el, .err, .log, .txt
-    const allowedTypes = /jpeg|jpg|png|gif|bmp|el|err|log|txt/;
-    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype) || 
-                     file.mimetype === 'application/octet-stream' ||
-                     file.mimetype === 'text/plain';
+    const allowedExtensions = /\.(jpeg|jpg|png|gif|bmp|el|err|log|txt)$/i;
+    const hasValidExtension = allowedExtensions.test(file.originalname);
     
-    if (mimetype && extname) {
+    // Para archivos de log (.el, .err, .log, .txt) aceptamos cualquier mimetype
+    // Para imágenes verificamos el mimetype también
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isLogFile = /\.(el|err|log|txt)$/i.test(ext);
+    const isImage = /\.(jpeg|jpg|png|gif|bmp)$/i.test(ext);
+    
+    if (hasValidExtension && (isLogFile || (isImage && file.mimetype.startsWith('image/')))) {
+      return cb(null, true);
+    } else if (hasValidExtension && isLogFile) {
+      // Permitir archivos de log con cualquier mimetype
       return cb(null, true);
     } else {
       cb(new Error('Tipo de archivo no permitido. Solo imágenes y archivos .el, .err, .log, .txt'));
@@ -787,16 +793,30 @@ app.post('/agenda/verificar-censo', verifyToken, async (req, res) => {
       [equipo_id]
     );
     
-    // Insertar en tabla codigo_registro (nuevo registro por cada censo verificado)
-    const insertResult = await query(
-      `INSERT INTO codigo_registro (codigo, equipo_id, licencia) 
-       VALUES ($1, $2, $3) 
+    // Actualizar la licencia en el registro existente de codigo_registro
+    const updateResult = await query(
+      `UPDATE codigo_registro 
+       SET licencia = $1 
+       WHERE equipo_id = $2 AND codigo = $3
        RETURNING *`,
-      [codigo, equipo_id, licencia]
+      [licencia, equipo_id, codigo]
     );
     
-    console.log('✅ Censo verificado y registro insertado:', {
-      registro_id: insertResult.rows[0].id,
+    if (updateResult.rows.length === 0) {
+      console.warn('⚠️ No se encontró registro previo en codigo_registro, insertando nuevo registro');
+      // Si no existe el registro (por algún error previo), insertarlo
+      const insertResult = await query(
+        `INSERT INTO codigo_registro (codigo, equipo_id, licencia) 
+         VALUES ($1, $2, $3) 
+         RETURNING *`,
+        [codigo, equipo_id, licencia]
+      );
+      console.log('✅ Registro insertado en codigo_registro:', insertResult.rows[0]);
+    } else {
+      console.log('✅ Licencia actualizada en codigo_registro:', updateResult.rows[0]);
+    }
+    
+    console.log('✅ Censo verificado exitosamente:', {
       equipo_id,
       codigo,
       licencia,
@@ -857,10 +877,16 @@ app.get('/admin/censos-programados', verifyToken, async (req, res) => {
         eq.marca,
         eq.modelo,
         eq.numero_serie,
-        e.nombre_empresa
+        eq.tipo_equipo,
+        eq.sistema_operativo,
+        eq.procesador,
+        eq.codigo_registro,
+        e.nombre_empresa,
+        emp.nombre_empleado
       FROM agenda ag
       INNER JOIN equipos eq ON ag.equipo_id = eq.id
       INNER JOIN empresas e ON eq.id_equipo = e.id_equipo
+      LEFT JOIN empleados emp ON eq.empleado_id = emp.id
       WHERE ag.status IN ('programado', 'registrado')
       ORDER BY ag.dia_agendado ASC
     `);
@@ -915,10 +941,13 @@ app.get('/admin/instalaciones-programadas', verifyToken, async (req, res) => {
         eq.modelo,
         eq.numero_serie,
         eq.tipo_equipo,
-        e.nombre_empresa
+        eq.empleado_id,
+        e.nombre_empresa,
+        emp.nombre_empleado
       FROM agenda ag
       INNER JOIN equipos eq ON ag.equipo_id = eq.id
       LEFT JOIN empresas e ON eq.id_equipo = e.id
+      LEFT JOIN empleados emp ON eq.empleado_id = emp.id
       WHERE ag.status = 'instalacion programada'
       ORDER BY ag.dia_agendado ASC
     `);
@@ -998,31 +1027,101 @@ app.put('/equipos/:id/status', verifyToken, async (req, res) => {
     }
 
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, codigo_registro } = req.body;
 
     if (!status) {
       return res.status(400).json({ error: 'status es requerido' });
     }
 
-    // Actualizar el status del equipo
-    await query(
-      'UPDATE equipos SET status = $1 WHERE id = $2',
-      [status, id]
-    );
+    // Si se proporciona código_registro, actualizarlo también
+    if (codigo_registro !== undefined) {
+      await query(
+        'UPDATE equipos SET status = $1, codigo_registro = $2 WHERE id = $3',
+        [status, codigo_registro, id]
+      );
+    } else {
+      // Solo actualizar el status del equipo
+      await query(
+        'UPDATE equipos SET status = $1 WHERE id = $2',
+        [status, id]
+      );
+    }
 
-    console.log('✅ Status de equipo actualizado:', {
+    console.log('✅ Equipo actualizado:', {
       equipo_id: id,
-      nuevo_status: status
+      nuevo_status: status,
+      codigo_registro: codigo_registro || 'sin cambios'
     });
 
     return res.json({
       success: true,
-      mensaje: 'Status actualizado exitosamente'
+      mensaje: 'Equipo actualizado exitosamente'
     });
 
   } catch (err) {
-    console.error('Error actualizando status:', err);
+    console.error('Error actualizando equipo:', err);
     return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Completar instalación (admin only)
+app.post('/admin/completar-instalacion', verifyToken, async (req, res) => {
+  try {
+    if (req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const { equipo_id, codigo_registro } = req.body;
+
+    if (!equipo_id || !codigo_registro) {
+      return res.status(400).json({ error: 'equipo_id y codigo_registro son requeridos' });
+    }
+
+    // Verificar que el equipo existe
+    const equipoResult = await query(
+      'SELECT * FROM equipos WHERE id = $1',
+      [equipo_id]
+    );
+
+    if (equipoResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Equipo no encontrado' });
+    }
+
+    // 1. Actualizar el equipo con el código de registro y cambiar status a 'pendiente'
+    await query(
+      'UPDATE equipos SET status = $1, codigo_registro = $2 WHERE id = $3',
+      ['pendiente', codigo_registro, equipo_id]
+    );
+
+    // 2. Insertar en la tabla codigo_registro
+    await query(
+      'INSERT INTO codigo_registro (codigo, equipo_id) VALUES ($1, $2)',
+      [codigo_registro, equipo_id]
+    );
+
+    // 3. Actualizar el registro en agenda (cambiar status a 'pendiente')
+    await query(
+      `UPDATE agenda SET status = 'pendiente' 
+       WHERE equipo_id = $1 AND status = 'instalacion programada'`,
+      [equipo_id]
+    );
+
+    console.log('✅ Instalación completada:', {
+      equipo_id,
+      codigo_registro,
+      usuario: req.user.email,
+      status_equipo: 'pendiente',
+      status_agenda: 'pendiente'
+    });
+
+    return res.json({
+      success: true,
+      mensaje: 'Instalación completada exitosamente. Equipo listo para revisión y activación.'
+    });
+
+  } catch (err) {
+    console.error('Error completando instalación:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
   }
 });
 
@@ -1607,13 +1706,33 @@ app.get('/tickets/mine', verifyToken, async (req, res) => {
 /**
  * Endpoint: GET /tickets
  * Lista todos los tickets (solo admin)
- * Incluye información del cliente y empresa asociada
+ * Incluye información del cliente, empresa y datos de agenda_tickets
  * Retorna: { tickets: [...] }
  */
 app.get('/tickets', verifyToken, async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
-    const result = await query('SELECT t.*, ue.nombre_usuario as cliente_nombre, ue.email as cliente_email, e.nombre_empresa FROM tickets t LEFT JOIN usuarios_empresas ue ON t.cliente_id = ue.id LEFT JOIN empresas e ON t.empresa_id = e.id ORDER BY t.created_at DESC');
+    const result = await query(`
+      SELECT 
+        t.*, 
+        ue.nombre_usuario as cliente_nombre, 
+        ue.email as cliente_email, 
+        e.nombre_empresa,
+        at.fecha_programada,
+        at.hora_programada,
+        at.tecnico_asignado,
+        at.notas_programacion,
+        at.direccion,
+        at.contacto_cliente,
+        at.telefono_cliente,
+        at.fecha_agendado,
+        at.fecha_realizacion
+      FROM tickets t 
+      LEFT JOIN usuarios_empresas ue ON t.cliente_id = ue.id 
+      LEFT JOIN empresas e ON t.empresa_id = e.id
+      LEFT JOIN agenda_tickets at ON t.id = at.ticket_id
+      ORDER BY t.created_at DESC
+    `);
     return res.json({ tickets: result.rows });
   } catch (err) {
     console.error('list tickets error', err);
@@ -1623,19 +1742,53 @@ app.get('/tickets', verifyToken, async (req, res) => {
 
 /**
  * Endpoint: PATCH /tickets/:id
- * Actualiza el status de un ticket (abierto|en_proceso|resuelto)
+ * Actualiza el status de un ticket (abierto|en_proceso|finalizado)
+ * Cuando se cambia a "en_proceso", crea registro en agenda_tickets
+ * Cuando se cambia a "finalizado", actualiza fecha_realizacion en agenda_tickets
  * Solo administradores pueden cambiar el status
- * Acepta: { status }
+ * Acepta: { status, fecha_programada, hora_programada, tecnico_asignado, notas_programacion }
  */
 app.patch('/tickets/:id', verifyToken, async (req, res) => {
   try {
     if (!req.user || req.user.rol !== 'admin') return res.status(403).json({ error: 'forbidden' });
     const { id } = req.params;
-    const { status } = req.body || {};
+    const { status, fecha_programada, hora_programada, tecnico_asignado, notas_programacion, direccion, contacto_cliente, telefono_cliente, observaciones_servicio } = req.body || {};
     if (!status) return res.status(400).json({ error: 'missing status' });
 
+    // Actualizar status del ticket
     const update = await query('UPDATE tickets SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *', [status, id]);
     if (update.rows.length === 0) return res.status(404).json({ error: 'ticket not found' });
+
+    // Si el status cambia a "en_proceso", crear registro en agenda_tickets
+    if (status === 'en_proceso') {
+      await query(
+        `INSERT INTO agenda_tickets 
+         (ticket_id, fecha_programada, hora_programada, tecnico_asignado, notas_programacion, direccion, contacto_cliente, telefono_cliente, agendado_por) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          id,
+          fecha_programada || null,
+          hora_programada || null,
+          tecnico_asignado || null,
+          notas_programacion || null,
+          direccion || null,
+          contacto_cliente || null,
+          telefono_cliente || null,
+          req.user.id
+        ]
+      );
+    }
+
+    // Si el status cambia a "finalizado", actualizar fecha_realizacion en agenda_tickets
+    if (status === 'finalizado') {
+      await query(
+        `UPDATE agenda_tickets 
+         SET fecha_realizacion = NOW(), realizado_por = $1, observaciones_servicio = $2 
+         WHERE ticket_id = $3 AND fecha_realizacion IS NULL`,
+        [req.user.id, observaciones_servicio || null, id]
+      );
+    }
+
     return res.json({ ticket: update.rows[0] });
   } catch (err) {
     console.error('update ticket error', err);
@@ -2180,11 +2333,12 @@ app.post('/servicios/confirm-payment', verifyToken, async (req, res) => {
     if (datosEquipo && datosEquipo.marca) {
       try {
         console.log('🔧 Insertando equipo con empresa_id:', empresa_id, 'datosEquipo:', datosEquipo);
+        console.log('📌 nombre_equipo recibido:', datosEquipo.nombre_equipo, 'tipo:', typeof datosEquipo.nombre_equipo);
         const equipoResult = await query(
           `INSERT INTO equipos 
            (id_equipo, empleado_id, tipo_equipo, marca, modelo, numero_serie, sistema_operativo, 
-            procesador, ram, disco_duro, codigo_registro, status) 
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
+            procesador, ram, disco_duro, nombre_equipo, codigo_registro, status) 
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) 
            RETURNING *`,
           [
             empresa_id,
@@ -2197,6 +2351,7 @@ app.post('/servicios/confirm-payment', verifyToken, async (req, res) => {
             datosEquipo.procesador || '',
             datosEquipo.memoria_ram || '',
             datosEquipo.disco_duro || '',
+            datosEquipo.nombre_equipo || '',
             datosEquipo.codigo_registro || '',
             'por instalar'
           ]

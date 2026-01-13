@@ -82,6 +82,7 @@ function ServicioPaymentForm({ monto, datosEquipo, onSuccess, onError }) {
 
       if (paymentIntent.status === 'succeeded') {
         // Confirmar en backend y enviar datos del equipo
+        console.log('📤 Enviando datosEquipo al backend:', datosEquipo)
         const resConfirm = await fetch(`${API}/servicios/confirm-payment`, {
           method: 'POST',
           headers: {
@@ -201,6 +202,8 @@ export default function ClientDashboard(){
   const [descripcionTicket, setDescripcionTicket] = useState('')
   const [archivosTicket, setArchivosTicket] = useState([])
   const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
+  const [mostrarNotificacionTicket, setMostrarNotificacionTicket] = useState(false)
+  const [mostrarNotificacionInstalacion, setMostrarNotificacionInstalacion] = useState(false)
 
   /**
    * Categorías jerárquicas de tickets de soporte
@@ -1135,6 +1138,10 @@ export default function ClientDashboard(){
       const data = await res.json()
       if(!res.ok) return setError(data.error || 'Error al crear ticket')
       
+      // Mostrar notificación animada
+      setMostrarNotificacionTicket(true)
+      setTimeout(() => setMostrarNotificacionTicket(false), 3000)
+      
       setSuccess('✓ Ticket creado exitosamente')
       setCategoriaSeleccionada('')
       setSubcategoriaSeleccionada('')
@@ -1162,6 +1169,157 @@ export default function ClientDashboard(){
       bottom:0,
       overflow:'hidden'
     }}>
+      {/* Notificación de Ticket Creado */}
+      {mostrarNotificacionInstalacion && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(59,130,246,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10001,
+          minWidth: 360,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 32,
+            animation: 'pulse 1.5s infinite'
+          }}>>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.15); }
+              }
+            `}</style>
+            🚀
+          </div>
+          <div style={{flex: 1}}>>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 16,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>>
+              ¡Solicitud de Instalación Enviada!
+            </div>
+            <div style={{
+              fontSize: 13,
+              opacity: 0.95
+            }}>>
+              Tu equipo ha sido registrado y la instalación programada
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionInstalacion(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            ⚙️
+          </div>
+        </div>
+      )}
+
+      {/* Notificación de ticket creado */}
+      {mostrarNotificacionTicket && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(16,185,129,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10000,
+          minWidth: 320,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 28,
+            animation: 'bounce 1s infinite'
+          }}>
+            <style>{`
+              @keyframes bounce {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-5px); }
+              }
+            `}</style>
+            ✅
+          </div>
+          <div style={{flex: 1}}>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 15,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>
+              ¡Ticket Creado con Éxito!
+            </div>
+            <div style={{
+              fontSize: 12,
+              opacity: 0.9
+            }}>
+              Tu ticket ha sido registrado correctamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionTicket(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            🎫
+          </div>
+        </div>
+      )}
       {/* Barra lateral con animación de expansión */}
       <div 
         style={{
@@ -2921,7 +3079,6 @@ export default function ClientDashboard(){
                     border:'2px dashed #0284c7'
                   }}>
                     <label style={{
-                      display:'block',
                       marginBottom:12,
                       fontSize:15,
                       fontWeight:600,
@@ -4447,15 +4604,18 @@ export default function ClientDashboard(){
                     style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
                   />
                 </label>
-                <label>
-                  <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Código de Registro *</div>
-                  <input
-                    type="text"
-                    value={instalacionForm.codigo_registro}
-                    onChange={(e)=>setInstalacionForm({...instalacionForm,codigo_registro:e.target.value})}
-                    style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
-                  />
-                </label>
+                {/* Solo mostrar código de registro si NO es instalación con asesor */}
+                {tipoInstalacion !== 'asesor' && (
+                  <label>
+                    <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>Código de Registro *</div>
+                    <input
+                      type="text"
+                      value={instalacionForm.codigo_registro}
+                      onChange={(e)=>setInstalacionForm({...instalacionForm,codigo_registro:e.target.value})}
+                      style={{width:'100%',padding:12,border:'2px solid #e2e8f0',borderRadius:8,fontSize:16}}
+                    />
+                  </label>
+                )}
                 <label>
                   <div style={{fontSize:14,fontWeight:600,color:'#475569',marginBottom:8}}>RAM *</div>
                   <input
@@ -4570,9 +4730,14 @@ export default function ClientDashboard(){
                 </button>
                 <button
                   onClick={()=>{
-                    if(!instalacionForm.marca || !instalacionForm.modelo || !instalacionForm.no_serie || 
-                       !instalacionForm.codigo_registro || !instalacionForm.memoria_ram || !instalacionForm.disco_duro ||
-                       !instalacionForm.sistema_operativo || !instalacionForm.procesador || !instalacionForm.empleado_id){
+                    // Validar campos requeridos (código de registro solo si NO es con asesor)
+                    const camposRequeridos = !instalacionForm.marca || !instalacionForm.modelo || 
+                      !instalacionForm.no_serie || !instalacionForm.memoria_ram || !instalacionForm.disco_duro ||
+                      !instalacionForm.sistema_operativo || !instalacionForm.procesador || !instalacionForm.empleado_id;
+                    
+                    const codigoRequerido = tipoInstalacion !== 'asesor' && !instalacionForm.codigo_registro;
+                    
+                    if(camposRequeridos || codigoRequerido){
                       setError('Por favor completa todos los campos requeridos (*)')
                       return
                     }
@@ -4630,7 +4795,8 @@ export default function ClientDashboard(){
                       marca: instalacionForm.marca,
                       modelo: instalacionForm.modelo,
                       numero_serie: instalacionForm.no_serie,
-                      codigo_registro: instalacionForm.codigo_registro,
+                      // No incluir código de registro si es instalación con asesor
+                      ...(tipoInstalacion !== 'asesor' && { codigo_registro: instalacionForm.codigo_registro }),
                       memoria_ram: instalacionForm.memoria_ram,
                       disco_duro: instalacionForm.disco_duro,
                       serie_disco_duro: instalacionForm.serie_disco_duro,
@@ -4642,12 +4808,19 @@ export default function ClientDashboard(){
                       empleado_id: instalacionForm.empleado_id
                     }}
                     onSuccess={async()=>{
-                      setSuccess('✓ Pago realizado exitosamente. Tu instalación ha sido programada y el equipo registrado.')
+                      setMostrarNotificacionInstalacion(true)
+                      setTimeout(() => setMostrarNotificacionInstalacion(false), 4000)
+                      
+                      // Resetear formularios
                       setInstalacionStep(1)
                       setInstalacionConfig({tipoEquipo:'',numBasesDatos:'',nombresBD:[]})
                       setInstalacionForm({marca:'',modelo:'',no_serie:'',codigo_registro:'',memoria_ram:'',
                         disco_duro:'',serie_disco_duro:'',sistema_operativo:'',procesador:'',
                         nombre_usuario_equipo:'',tipo_equipo:'',nombre_equipo:'',empleado_id:''})
+                      
+                      // Cambiar a la vista de equipos y refrescar la lista
+                      setView('equipos')
+                      await fetchEquipos()
                     }}
                     onError={(err)=>{
                       setError(err.message || 'Error al procesar el pago')

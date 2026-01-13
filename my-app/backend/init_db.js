@@ -197,6 +197,14 @@ async function run() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
+    
+    // Agregar columna updated_at si no existe
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
+    
+    // Agregar columnas de categorías si no existen
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS categoria VARCHAR(255)`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS subcategoria VARCHAR(255)`).catch(() => {});
+    
     console.log('Tickets table created or already exists.');
 
     // Tabla para archivos adjuntos de tickets
@@ -212,6 +220,25 @@ async function run() {
       fecha_subida TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`);
     console.log('Ticket archivos table created or already exists.');
+
+    // Tabla de agenda de tickets (programación de servicios)
+    await query(`CREATE TABLE IF NOT EXISTS agenda_tickets (
+      id SERIAL PRIMARY KEY,
+      ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+      fecha_programada DATE,
+      hora_programada TIME,
+      tecnico_asignado VARCHAR(255),
+      notas_programacion TEXT,
+      direccion TEXT,
+      contacto_cliente VARCHAR(255),
+      telefono_cliente VARCHAR(50),
+      fecha_agendado TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      agendado_por INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL,
+      fecha_realizacion TIMESTAMP,
+      realizado_por INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL,
+      observaciones_servicio TEXT
+    )`);
+    console.log('Agenda tickets table created or already exists.');
 
     // Tabla de pagos/transacciones
     await query(`CREATE TABLE IF NOT EXISTS pagos (
