@@ -794,12 +794,13 @@ app.post('/agenda/verificar-censo', verifyToken, async (req, res) => {
     );
     
     // Actualizar la licencia en el registro existente de codigo_registro
+    // Solo buscar por equipo_id para evitar duplicados
     const updateResult = await query(
       `UPDATE codigo_registro 
        SET licencia = $1 
-       WHERE equipo_id = $2 AND codigo = $3
+       WHERE equipo_id = $2
        RETURNING *`,
-      [licencia, equipo_id, codigo]
+      [licencia, equipo_id]
     );
     
     if (updateResult.rows.length === 0) {
@@ -1687,6 +1688,192 @@ app.post('/tickets', verifyToken, verificarMembresia, uploadTickets.array('archi
   } catch (err) {
     console.error('create ticket error', err);
     return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// Get my tickets (cliente only)
+app.get('/tickets/mine', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'cliente') return res.status(403).json({ error: 'forbidden' });
+    const result = await query('SELECT * FROM tickets WHERE cliente_id = $1 ORDER BY created_at DESC', [req.user.id]);
+    return res.json({ tickets: result.rows });
+  } catch (err) {
+    console.error('get my tickets error', err);
+    return res.status(500).json({ error: 'server error' });
+  }
+});
+
+// ==================== CHAT ENDPOINTS ====================
+
+/**
+ * Endpoint: POST /chat/enviar
+ * Envía un mensaje de chat relacionado con un ticket
+ * Crea la tabla mensajes_chat si no existe
+ * Registra quien envía el mensaje (cliente o admin)
+ */
+app.post('/chat/enviar', verifyToken, async (req, res) => {
+  try {
+    const { ticket_id, mensaje } = req.body;
+    
+    if (!ticket_id || !mensaje) {
+      return res.status(400).json({ error: 'ticket_id y mensaje son requeridos' });
+    }
+
+    // Verificar que el ticket existe y el usuario tiene acceso
+    const ticketResult = await query('SELECT * FROM tickets WHERE id = $1', [ticket_id]);
+    
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = ticketResult.rows[0];
+    
+    // Verificar permisos: admin puede acceder a todos, cliente solo a sus tickets
+    if (req.user.rol === 'cliente' && ticket.cliente_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para acceder a este ticket' });
+    }
+
+    // Crear tabla si no existe
+    await query(`CREATE TABLE IF NOT EXISTS mensajes_chat (
+      id SERIAL PRIMARY KEY,
+      ticket_id INTEGER REFERENCES tickets(id) ON DELETE CASCADE,
+      usuario_id INTEGER,
+      rol VARCHAR(50),
+      nombre_usuario VARCHAR(200),
+      mensaje TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Insertar mensaje
+    const result = await query(
+      `INSERT INTO mensajes_chat (ticket_id, usuario_id, rol, nombre_usuario, mensaje) 
+       VALUES ($1, $2, $3, $4, $5) 
+       RETURNING *`,
+      [
+        ticket_id,
+        req.user.id,
+        req.user.rol,
+        req.user.nombre_profile || req.user.email || 'Usuario',
+        mensaje
+      ]
+    );
+
+    console.log('💬 Nuevo mensaje de chat:', {
+      ticket_id,
+      usuario: req.user.email,
+      rol: req.user.rol,
+      mensaje: mensaje.substring(0, 50) + '...'
+    });
+
+    return res.status(201).json({ 
+      success: true, 
+      mensaje: result.rows[0] 
+    });
+
+  } catch (err) {
+    console.error('Error enviando mensaje de chat:', err);
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+/**
+ * Endpoint: GET /chat/tickets-con-mensajes
+ * Obtiene lista de tickets que tienen mensajes de chat
+ * Solo para admin - para mostrar notificaciones de chats activos
+ * Incluye info del último mensaje y contador de mensajes sin leer
+ * IMPORTANTE: Esta ruta debe estar ANTES de /chat/:ticket_id para evitar conflictos
+ */
+app.get('/chat/tickets-con-mensajes', verifyToken, async (req, res) => {
+  try {
+    if (!req.user || req.user.rol !== 'admin') {
+      return res.status(403).json({ error: 'Solo administradores pueden acceder' });
+    }
+
+    // Obtener tickets con mensajes, incluyendo el último mensaje y conteo
+    const result = await query(`
+      SELECT 
+        t.id,
+        t.asunto,
+        t.status,
+        t.cliente_id,
+        ue.nombre_profile as cliente_nombre,
+        ue.email as cliente_email,
+        COUNT(mc.id) as total_mensajes,
+        MAX(mc.created_at) as ultimo_mensaje_fecha,
+        (
+          SELECT mensaje 
+          FROM mensajes_chat 
+          WHERE ticket_id = t.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) as ultimo_mensaje,
+        (
+          SELECT rol 
+          FROM mensajes_chat 
+          WHERE ticket_id = t.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) as ultimo_mensaje_rol
+      FROM tickets t
+      INNER JOIN mensajes_chat mc ON t.id = mc.ticket_id
+      LEFT JOIN usuarios_empresas ue ON t.cliente_id = ue.id
+      GROUP BY t.id, t.asunto, t.status, t.cliente_id, ue.nombre_profile, ue.email
+      ORDER BY MAX(mc.created_at) DESC
+    `);
+
+    return res.json({ tickets: result.rows });
+
+  } catch (err) {
+    console.error('Error obteniendo tickets con mensajes:', err);
+    // Si la tabla no existe, devolver array vacío
+    if (err.message.includes('does not exist')) {
+      return res.json({ tickets: [] });
+    }
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+/**
+ * Endpoint: GET /chat/:ticket_id
+ * Obtiene todos los mensajes de chat de un ticket específico
+ * Verifica permisos: admin puede ver todos, cliente solo sus tickets
+ * Ordena mensajes por fecha ascendente
+ */
+app.get('/chat/:ticket_id', verifyToken, async (req, res) => {
+  try {
+    const { ticket_id } = req.params;
+
+    // Verificar que el ticket existe y el usuario tiene acceso
+    const ticketResult = await query('SELECT * FROM tickets WHERE id = $1', [ticket_id]);
+    
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = ticketResult.rows[0];
+    
+    // Verificar permisos
+    if (req.user.rol === 'cliente' && ticket.cliente_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para acceder a este ticket' });
+    }
+
+    // Obtener mensajes
+    const result = await query(
+      `SELECT * FROM mensajes_chat 
+       WHERE ticket_id = $1 
+       ORDER BY created_at ASC`,
+      [ticket_id]
+    );
+
+    return res.json({ mensajes: result.rows });
+
+  } catch (err) {
+    console.error('Error obteniendo mensajes de chat:', err);
+    // Si la tabla no existe aún, devolver array vacío
+    if (err.message.includes('does not exist')) {
+      return res.json({ mensajes: [] });
+    }
+    return res.status(500).json({ error: 'server error', details: err.message });
   }
 });
 

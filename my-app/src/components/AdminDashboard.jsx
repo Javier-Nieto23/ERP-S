@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import ChatModal from './ChatModal'
 
 /**
  * AdminDashboard - Panel de administración principal
@@ -62,11 +63,19 @@ export default function AdminDashboard(){
   const [nombreArchivoDescargado, setNombreArchivoDescargado] = useState('')
   const [mostrarNotificacionTicketProgramado, setMostrarNotificacionTicketProgramado] = useState(false)
   const [mostrarNotificacionCensoCompletado, setMostrarNotificacionCensoCompletado] = useState(false)
+  const [mostrarNotificacionCensoProgramado, setMostrarNotificacionCensoProgramado] = useState(false)
   const [mostrarNotificacionInstalacionProgramada, setMostrarNotificacionInstalacionProgramada] = useState(false)
   const [mostrarNotificacionInstalacionCompletada, setMostrarNotificacionInstalacionCompletada] = useState(false)
   const [ticketAProgramar, setTicketAProgramar] = useState(null)
   const [fechaProgramada, setFechaProgramada] = useState('')
   const [horaProgramada, setHoraProgramada] = useState('')
+  
+  // Estados para chat
+  const [ticketsConChat, setTicketsConChat] = useState([])
+  const [chatAbierto, setChatAbierto] = useState(false)
+  const [ticketChatActivo, setTicketChatActivo] = useState(null)
+  const [mostrarNotificacionChat, setMostrarNotificacionChat] = useState(false)
+  const [adminInfo, setAdminInfo] = useState(null)
 
   /**
    * Obtiene los días del mes en formato de calendario
@@ -189,6 +198,33 @@ export default function AdminDashboard(){
              fechaTicket.getMonth() === mes &&
              fechaTicket.getFullYear() === año;
     });
+  }
+
+  /**
+   * Obtiene la información del usuario admin desde el token JWT
+   * Decodifica el token para extraer id, email y rol
+   */
+  function getAdminInfoFromToken() {
+    try {
+      const token = localStorage.getItem('token')
+      if (!token) return null
+      
+      // Decodificar el payload del JWT (segunda parte del token)
+      const payload = token.split('.')[1]
+      const decodedPayload = JSON.parse(atob(payload))
+      
+      console.log('Admin info from token:', decodedPayload)
+      
+      return {
+        id: decodedPayload.id,
+        email: decodedPayload.email,
+        rol: decodedPayload.rol,
+        nombre: decodedPayload.nombre_profile || decodedPayload.email || 'Administrador'
+      }
+    } catch (e) {
+      console.error('Error decodificando token:', e)
+      return null
+    }
   }
 
   /**
@@ -536,7 +572,8 @@ export default function AdminDashboard(){
       const data = await res.json()
       if(!res.ok) return setError(data.error || 'Error al programar censo')
       
-      setSuccess('✓ Censo programado exitosamente')
+      setMostrarNotificacionCensoProgramado(true)
+      setTimeout(() => setMostrarNotificacionCensoProgramado(false), 4000)
       setEquipoAProgramar(null)
       setFechaCenso('')
       await fetchEquipos()
@@ -584,15 +621,58 @@ export default function AdminDashboard(){
   }
 
   useEffect(()=>{ 
+    // Cargar información del admin al montar el componente
+    const info = getAdminInfoFromToken()
+    setAdminInfo(info)
+    
     if(view==='equipos') fetchEquipos()
     if(view==='home') {
       fetchCensosProgramados()
       fetchInstalacionesProgramadas()
       fetchTickets()
+      fetchTicketsConChat()
     }
     if(view==='instalaciones') fetchEquiposPorInstalar()
     if(view==='tickets') fetchTickets()
   }, [view])
+
+  // Polling para tickets con chat cada 5 segundos
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (view === 'home' || view === 'tickets') {
+        fetchTicketsConChat()
+      }
+    }, 5000)
+    
+    return () => clearInterval(interval)
+  }, [view])
+
+  // Función para obtener tickets con mensajes de chat
+  async function fetchTicketsConChat() {
+    try {
+      const token = localStorage.getItem('token')
+      const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+      const res = await fetch(`${API}/chat/tickets-con-mensajes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        const ticketsAnteriores = ticketsConChat.length
+        setTicketsConChat(data.tickets || [])
+        
+        // Mostrar notificación si hay nuevos mensajes de clientes
+        if (data.tickets && data.tickets.length > ticketsAnteriores) {
+          const nuevosMensajesCliente = data.tickets.filter(t => t.ultimo_mensaje_rol === 'cliente')
+          if (nuevosMensajesCliente.length > 0) {
+            setMostrarNotificacionChat(true)
+            setTimeout(() => setMostrarNotificacionChat(false), 4000)
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching tickets con chat:', e)
+    }
+  }
 
   return (
     <div style={{
@@ -691,7 +771,7 @@ export default function AdminDashboard(){
       )}
 
       {/* Notificación de Ticket Programado */}
-      {mostrarNotificacionInstalacionCompletada && (
+      {mostrarNotificacionCensoProgramado && (
         <div style={{
           position: 'fixed',
           top: 24,
@@ -704,10 +784,10 @@ export default function AdminDashboard(){
           display: 'flex',
           alignItems: 'center',
           gap: 16,
-          zIndex: 10004,
+          zIndex: 10005,
           minWidth: 360,
           animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-        }}>>
+        }}>
           <style>{`
             @keyframes slideInBounce {
               0% {
@@ -726,7 +806,82 @@ export default function AdminDashboard(){
           <div style={{
             fontSize: 32,
             animation: 'pulse 1.5s infinite'
-          }}>>
+          }}>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.15); }
+              }
+            `}</style>
+            📅
+          </div>
+          <div style={{flex: 1}}>
+            <div style={{
+              fontWeight: 700,
+              fontSize: 16,
+              marginBottom: 4,
+              letterSpacing: '0.3px'
+            }}>
+              ¡Censo Programado Exitosamente!
+            </div>
+            <div style={{
+              fontSize: 13,
+              opacity: 0.95
+            }}>
+              El censo del equipo ha sido agendado correctamente
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8,
+            transition: 'opacity 0.2s'
+          }}
+          onClick={() => setMostrarNotificacionCensoProgramado(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            📋
+          </div>
+        </div>
+      )}
+
+      {mostrarNotificacionInstalacionCompletada && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(16,185,129,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10004,
+          minWidth: 360,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 32,
+            animation: 'pulse 1.5s infinite'
+          }}>
             <style>{`
               @keyframes pulse {
                 0%, 100% { transform: scale(1); }
@@ -735,20 +890,20 @@ export default function AdminDashboard(){
             `}</style>
             ✅
           </div>
-          <div style={{flex: 1}}>>
+          <div style={{flex: 1}}>
             <div style={{
               fontWeight: 700,
               fontSize: 16,
               marginBottom: 4,
               letterSpacing: '0.3px'
-            }}>>
+            }}>
               ¡Instalación Completada!
             </div>
             <div style={{
               fontSize: 13,
               opacity: 0.95
-            }}>>
-              La instalación del equipo se ha finalizado exitosamente
+            }}>
+              La instalación del equipo se ha finalizado exitosamente, Revisa el apartado de censos para continuar
             </div>
           </div>
           <div style={{
@@ -760,7 +915,7 @@ export default function AdminDashboard(){
           onClick={() => setMostrarNotificacionInstalacionCompletada(false)}
           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
           onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
-          >>
+          >
             ⚙️
           </div>
         </div>
@@ -782,7 +937,7 @@ export default function AdminDashboard(){
           zIndex: 10003,
           minWidth: 360,
           animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-        }}>>
+        }}>
           <style>{`
             @keyframes slideInBounce {
               0% {
@@ -801,7 +956,7 @@ export default function AdminDashboard(){
           <div style={{
             fontSize: 32,
             animation: 'pulse 1.5s infinite'
-          }}>>
+          }}>
             <style>{`
               @keyframes pulse {
                 0%, 100% { transform: scale(1); }
@@ -810,19 +965,19 @@ export default function AdminDashboard(){
             `}</style>
             🔧
           </div>
-          <div style={{flex: 1}}>>
+          <div style={{flex: 1}}>
             <div style={{
               fontWeight: 700,
               fontSize: 16,
               marginBottom: 4,
               letterSpacing: '0.3px'
-            }}>>
+            }}>
               ¡Instalación Programada!
             </div>
             <div style={{
               fontSize: 13,
               opacity: 0.95
-            }}>>
+            }}>
               La instalación del equipo ha sido agendada correctamente
             </div>
           </div>
@@ -835,7 +990,7 @@ export default function AdminDashboard(){
           onClick={() => setMostrarNotificacionInstalacionProgramada(false)}
           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
           onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
-          >>
+          >
             📅
           </div>
         </div>
@@ -857,7 +1012,7 @@ export default function AdminDashboard(){
           zIndex: 10002,
           minWidth: 360,
           animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-        }}>>
+        }}>
           <style>{`
             @keyframes slideInBounce {
               0% {
@@ -876,7 +1031,7 @@ export default function AdminDashboard(){
           <div style={{
             fontSize: 32,
             animation: 'pulse 1.5s infinite'
-          }}>>
+          }}>
             <style>{`
               @keyframes pulse {
                 0%, 100% { transform: scale(1); }
@@ -885,19 +1040,19 @@ export default function AdminDashboard(){
             `}</style>
             ✅
           </div>
-          <div style={{flex: 1}}>>
+          <div style={{flex: 1}}>
             <div style={{
               fontWeight: 700,
               fontSize: 16,
               marginBottom: 4,
               letterSpacing: '0.3px'
-            }}>>
+            }}>
               ¡Censo Completado Exitosamente!
             </div>
             <div style={{
               fontSize: 13,
               opacity: 0.95
-            }}>>
+            }}>
               El censo del equipo ha sido verificado correctamente
             </div>
           </div>
@@ -910,8 +1065,73 @@ export default function AdminDashboard(){
           onClick={() => setMostrarNotificacionCensoCompletado(false)}
           onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
           onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
-          >>
+          >
             📋
+          </div>
+        </div>
+      )}
+
+      {/* Notificación de Chat Activo */}
+      {mostrarNotificacionChat && (
+        <div style={{
+          position: 'fixed',
+          top: 24,
+          right: 24,
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: 12,
+          boxShadow: '0 8px 32px rgba(16,185,129,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          zIndex: 10005,
+          minWidth: 320,
+          animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+        }}>
+          <style>{`
+            @keyframes slideInBounce {
+              0% {
+                transform: translateX(500px) scale(0.5);
+                opacity: 0;
+              }
+              50% {
+                transform: translateX(-20px) scale(1.05);
+              }
+              100% {
+                transform: translateX(0) scale(1);
+                opacity: 1;
+              }
+            }
+            @keyframes bounce {
+              0%, 100% { transform: translateY(0); }
+              50% { transform: translateY(-5px); }
+            }
+          `}</style>
+          <div style={{
+            fontSize: 28,
+            animation: 'bounce 1s infinite'
+          }}>
+            💬
+          </div>
+          <div style={{flex: 1}}>
+            <div style={{fontWeight: 700, fontSize: 15, marginBottom: 4}}>
+              ¡Nuevo Mensaje de Chat!
+            </div>
+            <div style={{fontSize: 12, opacity: 0.9}}>
+              Un cliente requiere asistencia
+            </div>
+          </div>
+          <div style={{
+            fontSize: 24,
+            cursor: 'pointer',
+            opacity: 0.8
+          }}
+          onClick={() => setMostrarNotificacionChat(false)}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.8'}
+          >
+            ×
           </div>
         </div>
       )}
@@ -932,7 +1152,7 @@ export default function AdminDashboard(){
           zIndex: 10000,
           minWidth: 320,
           animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-        }}>>
+        }}>
           <style>{`
             @keyframes slideInBounce {
               0% {
@@ -1240,11 +1460,32 @@ export default function AdminDashboard(){
           >
             <span style={{fontSize: 20, minWidth: 20}}>🎫</span>
             {sidebarExpanded && (
+              <span style={{flex: 1, textAlign: 'left'}}>Tickets</span>
+            )}
+            {ticketsConChat.length > 0 && (
               <span style={{
-                whiteSpace: 'nowrap',
-                opacity: sidebarExpanded ? 1 : 0,
-                transition: 'opacity 0.3s ease 0.1s'
-              }}>Tickets de Soporte</span>
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: 'white',
+                fontSize: 11,
+                fontWeight: 700,
+                padding: '3px 8px',
+                borderRadius: 12,
+                minWidth: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(16, 185, 129, 0.4)',
+                animation: 'pulse 2s infinite'
+              }}>
+                <style>{`
+                  @keyframes pulse {
+                    0%, 100% { transform: scale(1); opacity: 1; }
+                    50% { transform: scale(1.1); opacity: 0.9; }
+                  }
+                `}</style>
+                {ticketsConChat.length}
+              </span>
             )}
           </button>
         </nav>
@@ -1738,51 +1979,53 @@ export default function AdminDashboard(){
                                   }}>
                                     {censo.status === 'registrado' ? '📋 Registrado' : '✓ Programado'}
                                   </span>
-                                  <button
-                                    onClick={() => {
-                                      // Limpiar mensajes
-                                      setError('');
-                                      setSuccess('');
-                                      
-                                      // Crear objeto completo con todos los datos necesarios
-                                      const equipoCompleto = {
-                                        id: censo.equipo_id,  // ID del equipo, NO del censo/agenda
-                                        codigo_registro: censo.codigo_registro,
-                                        nombre_empresa: censo.nombre_empresa,
-                                        tipo_equipo: censo.tipo_equipo,
-                                        marca: censo.marca,
-                                        modelo: censo.modelo,
-                                        numero_serie: censo.numero_serie,
-                                        nombre_empleado: censo.nombre_empleado || 'Sin asignar',
-                                        sistema_operativo: censo.sistema_operativo,
-                                        procesador: censo.procesador,
-                                        status: censo.status
-                                      };
-                                      
-                                      // Cerrar modal de agenda del día
-                                      setDiaSeleccionado(null);
-                                      // Cambiar a vista de solicitudes de censo
-                                      setView('equipos');
-                                      // Establecer el equipo para realizar censo
-                                      setEquipoEnCenso(equipoCompleto);
-                                    }}
-                                    style={{
-                                      padding:'10px 20px',
-                                      background:'#3b82f6',
-                                      color:'white',
-                                      border:'none',
-                                      borderRadius:8,
-                                      fontSize:14,
-                                      fontWeight:600,
-                                      cursor:'pointer',
-                                      transition:'all 0.2s',
-                                      whiteSpace:'nowrap'
-                                    }}
-                                    onMouseEnter={(e) => e.target.style.background = '#2563eb'}
-                                    onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
-                                  >
-                                    ✓ Realizar Censo
-                                  </button>
+                                  {censo.status !== 'registrado' && (
+                                    <button
+                                      onClick={() => {
+                                        // Limpiar mensajes
+                                        setError('');
+                                        setSuccess('');
+                                        
+                                        // Crear objeto completo con todos los datos necesarios
+                                        const equipoCompleto = {
+                                          id: censo.equipo_id,  // ID del equipo, NO del censo/agenda
+                                          codigo_registro: censo.codigo_registro,
+                                          nombre_empresa: censo.nombre_empresa,
+                                          tipo_equipo: censo.tipo_equipo,
+                                          marca: censo.marca,
+                                          modelo: censo.modelo,
+                                          numero_serie: censo.numero_serie,
+                                          nombre_empleado: censo.nombre_empleado || 'Sin asignar',
+                                          sistema_operativo: censo.sistema_operativo,
+                                          procesador: censo.procesador,
+                                          status: censo.status
+                                        };
+                                        
+                                        // Cerrar modal de agenda del día
+                                        setDiaSeleccionado(null);
+                                        // Cambiar a vista de solicitudes de censo
+                                        setView('equipos');
+                                        // Establecer el equipo para realizar censo
+                                        setEquipoEnCenso(equipoCompleto);
+                                      }}
+                                      style={{
+                                        padding:'10px 20px',
+                                        background:'#3b82f6',
+                                        color:'white',
+                                        border:'none',
+                                        borderRadius:8,
+                                        fontSize:14,
+                                        fontWeight:600,
+                                        cursor:'pointer',
+                                        transition:'all 0.2s',
+                                        whiteSpace:'nowrap'
+                                      }}
+                                      onMouseEnter={(e) => e.target.style.background = '#2563eb'}
+                                      onMouseLeave={(e) => e.target.style.background = '#3b82f6'}
+                                    >
+                                      ✓ Realizar Censo
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -4101,6 +4344,44 @@ export default function AdminDashboard(){
                       
                       {/* Botones de acción */}
                       <div style={{display:'flex',gap:8,marginLeft:16,flexDirection:'column'}}>
+                        {/* Botón de chat */}
+                        <button
+                          onClick={() => {
+                            setTicketChatActivo(ticket)
+                            setChatAbierto(true)
+                          }}
+                          style={{
+                            padding:'8px 14px',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            color:'white',
+                            border:'none',
+                            borderRadius:6,
+                            fontSize:13,
+                            fontWeight:600,
+                            cursor:'pointer',
+                            whiteSpace:'nowrap',
+                            boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+                            position: 'relative'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-2px)'}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+                        >
+                          💬 Chat
+                          {ticketsConChat.some(t => t.id === ticket.id && t.ultimo_mensaje_rol === 'cliente') && (
+                            <span style={{
+                              position: 'absolute',
+                              top: -4,
+                              right: -4,
+                              width: 10,
+                              height: 10,
+                              borderRadius: '50%',
+                              background: '#ef4444',
+                              border: '2px solid white',
+                              animation: 'pulse 2s infinite'
+                            }}></span>
+                          )}
+                        </button>
+                        
                         {ticket.status === 'abierto' && (
                           <button
                             onClick={() => abrirModalProgramacion(ticket)}
@@ -4372,6 +4653,24 @@ export default function AdminDashboard(){
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Chat */}
+      {chatAbierto && ticketChatActivo && adminInfo && (
+        <ChatModal
+          ticketId={ticketChatActivo.id}
+          ticketTitulo={ticketChatActivo.asunto || ticketChatActivo.titulo}
+          usuarioActual={{ 
+            id: adminInfo.id,
+            nombre: adminInfo.nombre, 
+            rol: adminInfo.rol
+          }}
+          onClose={() => {
+            setChatAbierto(false)
+            setTicketChatActivo(null)
+            fetchTicketsConChat() // Refrescar lista de tickets con chat
+          }}
+        />
       )}
     </div>
   )

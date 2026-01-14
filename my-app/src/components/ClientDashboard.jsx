@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import StripePaymentModal from './StripePaymentModal'
+import ChatModal from './ChatModal'
 
 // Inyectar estilos de animación
 const styles = document.createElement('style')
@@ -204,6 +205,10 @@ export default function ClientDashboard(){
   const [archivosTicketsPorId, setArchivosTicketsPorId] = useState({})
   const [mostrarNotificacionTicket, setMostrarNotificacionTicket] = useState(false)
   const [mostrarNotificacionInstalacion, setMostrarNotificacionInstalacion] = useState(false)
+  
+  // Estados para chat
+  const [chatAbierto, setChatAbierto] = useState(false)
+  const [ticketChatActivo, setTicketChatActivo] = useState(null)
 
   /**
    * Categorías jerárquicas de tickets de soporte
@@ -1186,7 +1191,7 @@ export default function ClientDashboard(){
           zIndex: 10001,
           minWidth: 360,
           animation: 'slideInBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
-        }}>>
+        }}>
           <style>{`
             @keyframes slideInBounce {
               0% {
@@ -1205,7 +1210,7 @@ export default function ClientDashboard(){
           <div style={{
             fontSize: 32,
             animation: 'pulse 1.5s infinite'
-          }}>>
+          }}>
             <style>{`
               @keyframes pulse {
                 0%, 100% { transform: scale(1); }
@@ -1214,19 +1219,19 @@ export default function ClientDashboard(){
             `}</style>
             🚀
           </div>
-          <div style={{flex: 1}}>>
+          <div style={{flex: 1}}>
             <div style={{
               fontWeight: 700,
               fontSize: 16,
               marginBottom: 4,
               letterSpacing: '0.3px'
-            }}>>
+            }}>
               ¡Solicitud de Instalación Enviada!
             </div>
             <div style={{
               fontSize: 13,
               opacity: 0.95
-            }}>>
+            }}>
               Tu equipo ha sido registrado y la instalación programada
             </div>
           </div>
@@ -3810,6 +3815,40 @@ export default function ClientDashboard(){
                             </div>
                           )}
                         </div>
+                        
+                        {/* Botón de chat */}
+                        <button
+                          onClick={() => {
+                            setTicketChatActivo(ticket)
+                            setChatAbierto(true)
+                          }}
+                          style={{
+                            marginLeft: 16,
+                            padding: '10px 16px',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            fontSize: 14,
+                            fontWeight: 600,
+                            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                            transition: 'all 0.2s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-2px)'
+                            e.currentTarget.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.4)'
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)'
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)'
+                          }}
+                        >
+                          💬 Chat con Soporte
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -3819,6 +3858,19 @@ export default function ClientDashboard(){
           </div>
         )}
       </div>
+
+      {/* Modal de Chat */}
+      {chatAbierto && ticketChatActivo && perfil && (
+        <ChatModal
+          ticketId={ticketChatActivo.id}
+          ticketTitulo={ticketChatActivo.asunto || ticketChatActivo.titulo}
+          usuarioActual={{ id: perfil.id, nombre: perfil.nombre_profile || perfil.email, rol: 'cliente' }}
+          onClose={() => {
+            setChatAbierto(false)
+            setTicketChatActivo(null)
+          }}
+        />
+      )}
 
       {/* Modal de Pago con Stripe */}
       {mostrarPagos && planes && (
