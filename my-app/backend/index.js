@@ -1777,11 +1777,54 @@ app.post('/chat/enviar', verifyToken, async (req, res) => {
 });
 
 /**
+ * Endpoint: GET /chat/:ticket_id
+ * Obtiene todos los mensajes de chat de un ticket específico
+ * Verifica permisos: admin puede ver todos, cliente solo sus tickets
+ * Ordena mensajes por fecha ascendente
+ */
+app.get('/chat/:ticket_id', verifyToken, async (req, res) => {
+  try {
+    const { ticket_id } = req.params;
+
+    // Verificar que el ticket existe y el usuario tiene acceso
+    const ticketResult = await query('SELECT * FROM tickets WHERE id = $1', [ticket_id]);
+    
+    if (ticketResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Ticket no encontrado' });
+    }
+
+    const ticket = ticketResult.rows[0];
+    
+    // Verificar permisos
+    if (req.user.rol === 'cliente' && ticket.cliente_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para acceder a este ticket' });
+    }
+
+    // Obtener mensajes
+    const result = await query(
+      `SELECT * FROM mensajes_chat 
+       WHERE ticket_id = $1 
+       ORDER BY created_at ASC`,
+      [ticket_id]
+    );
+
+    return res.json({ mensajes: result.rows });
+
+  } catch (err) {
+    console.error('Error obteniendo mensajes de chat:', err);
+    // Si la tabla no existe aún, devolver array vacío
+    if (err.message.includes('does not exist')) {
+      return res.json({ mensajes: [] });
+    }
+    return res.status(500).json({ error: 'server error', details: err.message });
+  }
+});
+
+/**
  * Endpoint: GET /chat/tickets-con-mensajes
  * Obtiene lista de tickets que tienen mensajes de chat
  * Solo para admin - para mostrar notificaciones de chats activos
  * Incluye info del último mensaje y contador de mensajes sin leer
- * IMPORTANTE: Esta ruta debe estar ANTES de /chat/:ticket_id para evitar conflictos
  */
 app.get('/chat/tickets-con-mensajes', verifyToken, async (req, res) => {
   try {
@@ -1828,50 +1871,6 @@ app.get('/chat/tickets-con-mensajes', verifyToken, async (req, res) => {
     // Si la tabla no existe, devolver array vacío
     if (err.message.includes('does not exist')) {
       return res.json({ tickets: [] });
-    }
-    return res.status(500).json({ error: 'server error', details: err.message });
-  }
-});
-
-/**
- * Endpoint: GET /chat/:ticket_id
- * Obtiene todos los mensajes de chat de un ticket específico
- * Verifica permisos: admin puede ver todos, cliente solo sus tickets
- * Ordena mensajes por fecha ascendente
- */
-app.get('/chat/:ticket_id', verifyToken, async (req, res) => {
-  try {
-    const { ticket_id } = req.params;
-
-    // Verificar que el ticket existe y el usuario tiene acceso
-    const ticketResult = await query('SELECT * FROM tickets WHERE id = $1', [ticket_id]);
-    
-    if (ticketResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Ticket no encontrado' });
-    }
-
-    const ticket = ticketResult.rows[0];
-    
-    // Verificar permisos
-    if (req.user.rol === 'cliente' && ticket.cliente_id !== req.user.id) {
-      return res.status(403).json({ error: 'No tienes permiso para acceder a este ticket' });
-    }
-
-    // Obtener mensajes
-    const result = await query(
-      `SELECT * FROM mensajes_chat 
-       WHERE ticket_id = $1 
-       ORDER BY created_at ASC`,
-      [ticket_id]
-    );
-
-    return res.json({ mensajes: result.rows });
-
-  } catch (err) {
-    console.error('Error obteniendo mensajes de chat:', err);
-    // Si la tabla no existe aún, devolver array vacío
-    if (err.message.includes('does not exist')) {
-      return res.json({ mensajes: [] });
     }
     return res.status(500).json({ error: 'server error', details: err.message });
   }

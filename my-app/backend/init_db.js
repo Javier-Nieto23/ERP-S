@@ -128,6 +128,8 @@ async function run() {
     await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS asunto VARCHAR(250)`).catch(() => {});
     await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS status VARCHAR(80)`).catch(() => {});
     await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS chat_solicitado BOOLEAN DEFAULT FALSE`).catch(() => {});
+    await query(`ALTER TABLE tickets ADD COLUMN IF NOT EXISTS admin_asignado_id INTEGER REFERENCES usuarios_internos(id) ON DELETE SET NULL`).catch(() => {});
 
     // Usuarios Empresas (usuarios que pertenecen a una empresa)
     await query(`CREATE TABLE IF NOT EXISTS usuarios_empresas (

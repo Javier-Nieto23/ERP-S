@@ -138,7 +138,7 @@ function ChatModal({ ticketId, ticketTitulo, usuarioActual, onClose }) {
           justifyContent: 'space-between',
           alignItems: 'center'
         }}>
-          <div>
+          <div style={{ flex: 1 }}>
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>
               💬 Chat de Soporte
             </h3>
@@ -146,6 +146,54 @@ function ChatModal({ ticketId, ticketTitulo, usuarioActual, onClose }) {
               {ticketTitulo}
             </p>
           </div>
+          
+          {/* Botón Cerrar Ticket - solo para admin */}
+          {usuarioActual.rol === 'admin' && (
+            <button
+              onClick={async () => {
+                if (confirm('¿Estás seguro de cerrar este ticket?')) {
+                  try {
+                    const token = localStorage.getItem('token')
+                    const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                    const res = await fetch(`${API}/tickets/${ticketId}/cerrar`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`
+                      }
+                    })
+                    if (res.ok) {
+                      alert('Ticket cerrado exitosamente')
+                      onClose()
+                    } else {
+                      const data = await res.json()
+                      alert(data.error || 'Error al cerrar ticket')
+                    }
+                  } catch (e) {
+                    console.error('Error cerrando ticket:', e)
+                    alert('Error de conexión')
+                  }
+                }
+              }}
+              style={{
+                padding: '8px 16px',
+                background: 'rgba(239, 68, 68, 0.9)',
+                border: 'none',
+                color: 'white',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                borderRadius: 6,
+                marginRight: 12,
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#dc2626'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.9)'}
+            >
+              ✓ Cerrar Ticket
+            </button>
+          )}
+          
           <button
             onClick={onClose}
             style={{

@@ -809,6 +809,11 @@ export default function ClientDashboard(){
     if(view==='equipos') fetchEquipos()
   }, [view])
 
+  // Cargar perfil al montar el componente (necesario para el chat)
+  useEffect(() => {
+    fetchPerfil()
+  }, [])
+
   async function fetchTickets(){
     try{
       const token = localStorage.getItem('token')
@@ -3818,9 +3823,25 @@ export default function ClientDashboard(){
                         
                         {/* Botón de chat */}
                         <button
-                          onClick={() => {
-                            setTicketChatActivo(ticket)
-                            setChatAbierto(true)
+                          onClick={async () => {
+                            // Solicitar chat al backend
+                            try {
+                              const token = localStorage.getItem('token')
+                              const API = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+                              const res = await fetch(`${API}/tickets/${ticket.id}/solicitar-chat`, {
+                                method: 'POST',
+                                headers: {
+                                  'Content-Type': 'application/json',
+                                  Authorization: `Bearer ${token}`
+                                }
+                              })
+                              if (res.ok) {
+                                setTicketChatActivo(ticket)
+                                setChatAbierto(true)
+                              }
+                            } catch (e) {
+                              console.error('Error solicitando chat:', e)
+                            }
                           }}
                           style={{
                             marginLeft: 16,
@@ -3847,7 +3868,7 @@ export default function ClientDashboard(){
                             e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)'
                           }}
                         >
-                          💬 Chat con Soporte
+                          💬 Contactar con un asesor
                         </button>
                       </div>
                     </div>
